@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import func, case
 from datetime import datetime, timedelta
 
-from app.database import engine, Base, get_db
+from app.database import engine, get_db
 from app.schemas import ProductCharacteristicOut, SyncLogOut, TokenRequest, StockOut, OrderOut, PriceOut, SalesReportRowOut, SaleOut
 from app.crud import get_characteristics, get_sync_logs, get_stocks, get_orders, load_tokens_mapping, get_prices, get_sales_report, get_sales
 from app.models import ProductCharacteristic, Stock, Order, Price, SalesReport, Sale
@@ -36,8 +36,9 @@ def token_id(token: str) -> str:
 async def lifespan(app: FastAPI):
     for attempt in range(1, 11):
         try:
-            Base.metadata.create_all(bind=engine)
-            logger.info("Подключение к БД успешно, таблицы созданы")
+            with engine.connect() as conn:
+                conn.execute(__import__("sqlalchemy").text("SELECT 1"))
+            logger.info("Подключение к БД успешно")
             break
         except Exception as e:
             logger.warning(f"БД не готова, попытка {attempt}/10: {e}")
