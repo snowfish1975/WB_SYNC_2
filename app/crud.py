@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from app.models import ProductCharacteristic, SyncLog, Stock, Order, Price, SalesReport, Sale
+from app.models import ProductCharacteristic, SyncLog, Stock, Order, Price, SalesReport, Sale, User, ApiKey, WbToken
 from datetime import datetime, timedelta
 import os
 import hashlib
@@ -499,3 +499,177 @@ def get_sales(
     threshold = datetime.now() - timedelta(days=days_back)
     q = q.filter(Sale.date >= threshold)
     return q.order_by(Sale.date.desc()).offset(offset).limit(limit).all()
+
+
+# =====================
+# USER CRUD
+# =====================
+
+def create_user(db: Session, username: str, email: str | None = None, password_hash: str | None = None) -> User:
+    user = User(username=username, email=email, password_hash=password_hash)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def get_user_by_id(db: Session, user_id: int) -> User | None:
+    return db.query(User).filter(User.id == user_id).first()
+
+
+def get_user_by_username(db: Session, username: str) -> User | None:
+    return db.query(User).filter(User.username == username).first()
+
+
+def list_users(db: Session) -> list[User]:
+    return db.query(User).order_by(User.created_at.desc()).all()
+
+
+def update_user(db: Session, user_id: int, **kwargs) -> User | None:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return None
+    for key, value in kwargs.items():
+        if hasattr(user, key):
+            setattr(user, key, value)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def delete_user(db: Session, user_id: int) -> bool:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return False
+    db.delete(user)
+    db.commit()
+    return True
+
+
+# =====================
+# API KEY CRUD
+# =====================
+
+def create_api_key(db: Session, user_id: int, key_hash: str, name: str | None = None, expires_at: datetime | None = None) -> ApiKey:
+    api_key = ApiKey(user_id=user_id, key_hash=key_hash, name=name, expires_at=expires_at)
+    db.add(api_key)
+    db.commit()
+    db.refresh(api_key)
+    return api_key
+
+
+def get_api_key_by_hash(db: Session, key_hash: str) -> ApiKey | None:
+    return db.query(ApiKey).filter(ApiKey.key_hash == key_hash).first()
+
+
+def list_api_keys(db: Session, user_id: int | None = None) -> list[ApiKey]:
+    q = db.query(ApiKey)
+    if user_id:
+        q = q.filter(ApiKey.user_id == user_id)
+    return q.order_by(ApiKey.created_at.desc()).all()
+
+
+def update_api_key_last_used(db: Session, api_key_id: int):
+    api_key = db.query(ApiKey).filter(ApiKey.id == api_key_id).first()
+    if api_key:
+        api_key.last_used_at = datetime.utcnow()
+        db.commit()
+
+
+def delete_api_key(db: Session, api_key_id: int) -> bool:
+    api_key = db.query(ApiKey).filter(ApiKey.id == api_key_id).first()
+    if not api_key:
+        return False
+    db.delete(api_key)
+    db.commit()
+    return True
+
+
+# =====================
+# WB TOKEN CRUD
+# =====================
+
+def create_wb_token(db: Session, user_id: int, seller_name: str, token: str) -> WbToken:
+    token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
+    wb_token = WbToken(user_id=user_id, seller_name=seller_name, token_hash=token_hash)
+    db.add(wb_token)
+    db.commit()
+    db.refresh(wb_token)
+    return wb_token
+
+
+def get_wb_token_by_hash(db: Session, token_hash: str) -> WbToken | None:
+    return db.query(WbToken).filter(WbToken.token_hash == token_hash).first()
+
+
+def list_wb_tokens(db: Session, user_id: int | None = None, active_only: bool = False) -> list[WbToken]:
+    q = db.query(WbToken)
+    if user_id:
+        q = q.filter(WbToken.user_id == user_id)
+    if active_only:
+        q = q.filter(WbToken.is_active == True)
+    return q.order_by(WbToken.created_at.desc()).all()
+
+
+def update_wb_token(db: Session, token_id: int, **kwargs) -> WbToken | None:
+    wb_token = db.query(WbToken).filter(WbToken.id == token_id).first()
+    if not wb_token:
+        return None
+    for key, value in kwargs.items():
+        if hasattr(wb_token, key):
+            setattr(wb_token, key, value)
+    wb_token.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(wb_token)
+    return wb_token
+
+
+def delete_wb_token(db: Session, token_id: int) -> bool:
+    wb_token = db.query(WbToken).filter(WbToken.id == token_id).first()
+    if not wb_token:
+        return False
+    db.delete(wb_token)
+    db.commit()
+    return True
+
+
+def get_tokens_from_db() -> list[dict]:
+    """Загрузка токенов из БД (заменяет load_tokens_from_json)."""
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        tokens = db.query(WbToken).filter(WbToken.is_active == True).all()
+        return [{"token_hash": t.token_hash, "seller_name": t.seller_name, "user_id": t.user_id} for t in tokens]
+    finally:
+        db.close()
+
+
+def get_token_mapping_from_db() -> dict[str, str]:
+    """Получение маппинга cabinet_id → seller_name из БД."""
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        tokens = db.query(WbToken).filter(WbToken.is_active == True).all()
+        return {t.token_hash: t.seller_name for t in tokens}
+    finally:
+        db.close()
+
+
+def load_token_mapping() -> dict[str, str]:
+    """Единая функция загрузки маппинга токенов (из БД или env var как fallback)."""
+    mapping = get_token_mapping_from_db()
+    if mapping:
+        return mapping
+
+    # Fallback: загрузка из env var (для обратной совместимости)
+    raw = os.getenv("WB_TOKENS_JSON", "{}")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        data = {}
+
+    for name, token in data.items():
+        tid = hashlib.sha256(token.encode()).hexdigest()[:32]
+        mapping[tid] = name
+
+    return mapping

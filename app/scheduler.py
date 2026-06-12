@@ -19,7 +19,7 @@ from app.crud import (
     upsert_characteristic, upsert_stock, log_sync, upsert_price,
     upsert_sales_report_row, upsert_orders_bulk, upsert_sales_bulk,
     clear_characteristics, clear_stocks, clear_old_orders, clear_old_sales,
-    clear_sales_report,
+    clear_sales_report, get_tokens_from_db, get_token_mapping_from_db, load_token_mapping,
 )
 from app.database import SessionLocal
 
@@ -33,6 +33,14 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "356741753")
 
 
 def load_tokens_from_json() -> list[dict]:
+    """Загрузка токенов из БД с fallback на env var."""
+    # Сначала пытаемся загрузить из БД
+    db_tokens = get_tokens_from_db()
+    if db_tokens:
+        logger.info(f"Загружено {len(db_tokens)} кабинетов из БД")
+        return db_tokens
+    
+    # Fallback: загрузка из env var (для обратной совместимости)
     raw = os.getenv("WB_TOKENS_JSON", "{}")
     try:
         data = json.loads(raw)
@@ -63,18 +71,8 @@ def get_tokens() -> list[str]:
 
 
 def get_token_mapping() -> dict[str, str]:
-    tokens_data = load_tokens_from_json()
-    mapping = {}
-    for item in tokens_data:
-        mapping[item["cabinet_id"]] = item["name"]
-    if not mapping:
-        tokens = [t.strip() for t in os.getenv("WB_TOKENS", "").split(",") if t.strip()]
-        names = [n.strip() for n in os.getenv("WB_NAMES", "").split(",") if n.strip()]
-        for i, token in enumerate(tokens):
-            tid = token_id(token)
-            name = names[i] if i < len(names) else tid[:8]
-            mapping[tid] = name
-    return mapping
+    """Получение маппинга cabinet_id → seller_name из БД или env var."""
+    return load_token_mapping()
 
 
 def get_cabinets_list() -> list[dict]:

@@ -27,6 +27,87 @@ class TokenRequest(BaseModel):
     token: str
 
 
+# =====================
+# USER SCHEMAS
+# =====================
+
+class UserCreate(BaseModel):
+    username: str
+    email: str | None = None
+    password: str | None = None
+
+
+class UserUpdate(BaseModel):
+    username: str | None = None
+    email: str | None = None
+    is_active: bool | None = None
+
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    email: str | None = None
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# =====================
+# API KEY SCHEMAS
+# =====================
+
+class ApiKeyCreate(BaseModel):
+    name: str | None = None
+    expires_at: datetime | None = None
+
+
+class ApiKeyOut(BaseModel):
+    id: int
+    user_id: int
+    name: str | None = None
+    key_hash: str
+    expires_at: datetime | None = None
+    created_at: datetime
+    last_used_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ApiKeyCreatedResponse(BaseModel):
+    id: int
+    name: str | None = None
+    api_key: str  # отображается только один раз!
+    expires_at: datetime | None = None
+    created_at: datetime
+
+
+# =====================
+# WB TOKEN SCHEMAS
+# =====================
+
+class WbTokenCreate(BaseModel):
+    seller_name: str
+    token: str
+
+
+class WbTokenUpdate(BaseModel):
+    seller_name: str | None = None
+    is_active: bool | None = None
+
+
+class WbTokenOut(BaseModel):
+    id: int
+    user_id: int
+    seller_name: str
+    token_hash: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class StockOut(BaseModel):
     id: int
     nm_id: int

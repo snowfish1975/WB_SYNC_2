@@ -15,7 +15,15 @@ from datetime import datetime, timedelta
 
 from app.database import engine, get_db
 from app.schemas import ProductCharacteristicOut, SyncLogOut, TokenRequest, StockOut, OrderOut, PriceOut, SalesReportRowOut, SaleOut
-from app.crud import get_characteristics, get_sync_logs, get_stocks, get_orders, load_tokens_mapping, get_prices, get_sales_report, get_sales
+from app.crud import (
+    get_characteristics, get_sync_logs, get_stocks, get_orders,
+    load_tokens_mapping, get_prices, get_sales_report, get_sales,
+    create_user, get_user_by_id, get_user_by_username, list_users, update_user, delete_user,
+    create_api_key, get_api_key_by_hash, list_api_keys, update_api_key_last_used, delete_api_key,
+    create_wb_token, get_wb_token_by_hash, list_wb_tokens, update_wb_token, delete_wb_token,
+    load_token_mapping,
+)
+from app.models import User, ApiKey, WbToken
 from app.models import ProductCharacteristic, Stock, Order, Price, SalesReport, Sale
 from app.scheduler import run_sync_all, run_sales_report_sync
 
@@ -438,3 +446,145 @@ def dashboard_orders_raw(
         result.append(row)
 
     return JSONResponse(content=result)
+
+
+# =====================
+# USER MANAGEMENT
+# =====================
+
+@app.post("/api/users", response_model=list[UserOut])
+def api_create_user(body: UserCreate, db: Session = Depends(get_db)):
+    """Создание нового пользователя."""
+    existing = get_user_by_username(db, body.username)
+    if existing:
+        return JSONResponse(status_code=400, content={"error": "Username already exists"})
+    
+    import hashlib
+    password_hash = hashlib.sha256(body.password.encode()).hexdigest() if body.password else None
+    
+    user = create_user(db, username=body.username, email=body.email, password_hash=password_hash)
+    return [user]
+
+
+@app.get("/api/users", response_model=list[UserOut])
+def api_list_users(db: Session = Depends(get_db)):
+    """Список всех пользователей."""
+    return list_users(db)
+
+
+@app.get("/api/users/{user_id}", response_model=list[UserOut])
+def api_get_user(user_id: int, db: Session = Depends(get_db)):
+    """Получение пользователя по ID."""
+    user = get_user_by_id(db, user_id)
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    return [user]
+
+
+@app.put("/api/users/{user_id}", response_model=list[UserOut])
+def api_update_user(user_id: int, body: UserUpdate, db: Session = Depends(get_db)):
+    """Обновление пользователя."""
+    update_data = body.model_dump(exclude_unset=True)
+    user = update_user(db, user_id, **update_data)
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    return [user]
+
+
+@app.delete("/api/users/{user_id}")
+def api_delete_user(user_id: int, db: Session = Depends(get_db)):
+    """Удаление пользователя."""
+    success = delete_user(db, user_id)
+    if not success:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    return {"status": "deleted"}
+
+
+# =====================
+# API KEY MANAGEMENT
+# =====================
+
+@app.post("/api/users/{user_id}/api-keys")
+def api_create_api_key(user_id: int, body: ApiKeyCreate, db: Session = Depends(get_db)):
+    """Создание API-ключа для пользователя. Ключ отображается только один раз!"""
+    import secrets
+    import hashlib
+    
+    user = get_user_by_id(db, user_id)
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    api_key = secrets.token_urlsafe(32)
+    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    
+    db_key = create_api_key(db, user_id=user_id, key_hash=key_hash, name=body.name, expires_at=body.expires_at)
+    
+    return {
+        "id": db_key.id,
+        "name": db_key.name,
+        "api_key": api_key,
+        "expires_at": db_key.expires_at,
+        "created_at": db_key.created_at,
+    }
+
+
+@app.get("/api/users/{user_id}/api-keys", response_model=list[ApiKeyOut])
+def api_list_api_keys(user_id: int, db: Session = Depends(get_db)):
+    """Список API-ключей пользователя."""
+    return list_api_keys(db, user_id=user_id)
+
+
+@app.delete("/api/api-keys/{key_id}")
+def api_delete_api_key(key_id: int, db: Session = Depends(get_db)):
+    """Удаление API-ключа."""
+    success = delete_api_key(db, key_id)
+    if not success:
+        return JSONResponse(status_code=404, content={"error": "API key not found"})
+    return {"status": "deleted"}
+
+
+# =====================
+# WB TOKEN MANAGEMENT
+# =====================
+
+@app.post("/api/users/{user_id}/wb-tokens", response_model=list[WbTokenOut])
+def api_create_wb_token(user_id: int, body: WbTokenCreate, db: Session = Depends(get_db)):
+    """Добавление токена Wildberries для пользователя."""
+    user = get_user_by_id(db, user_id)
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    # Проверяем уникальность токена
+    import hashlib
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()[:32]
+    existing = get_wb_token_by_hash(db, token_hash)
+    if existing:
+        return JSONResponse(status_code=400, content={"error": "Token already exists"})
+    
+    wb_token = create_wb_token(db, user_id=user_id, seller_name=body.seller_name, token=body.token)
+    return [wb_token]
+
+
+@app.get("/api/wb-tokens", response_model=list[WbTokenOut])
+def api_list_wb_tokens(user_id: int | None = Query(None), active_only: bool = Query(False), db: Session = Depends(get_db)):
+    """Список всех токенов Wildberries."""
+    return list_wb_tokens(db, user_id=user_id, active_only=active_only)
+
+
+@app.put("/api/wb-tokens/{token_id}", response_model=list[WbTokenOut])
+def api_update_wb_token(token_id: int, body: WbTokenUpdate, db: Session = Depends(get_db)):
+    """Обновление токена Wildberries."""
+    update_data = body.model_dump(exclude_unset=True)
+    wb_token = update_wb_token(db, token_id, **update_data)
+    if not wb_token:
+        return JSONResponse(status_code=404, content={"error": "Token not found"})
+    return [wb_token]
+
+
+@app.delete("/api/wb-tokens/{token_id}")
+def api_delete_wb_token(token_id: int, db: Session = Depends(get_db)):
+    """Удаление токена Wildberries."""
+    success = delete_wb_token(db, token_id)
+    if not success:
+        return JSONResponse(status_code=404, content={"error": "Token not found"})
+    return {"status": "deleted"}
