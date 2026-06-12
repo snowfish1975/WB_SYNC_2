@@ -1,0 +1,127 @@
+<!-- ============================================================
+     TAB: ТОП ТОВАРОВ
+     ============================================================ -->
+<div id="topTab">
+  <div class="card">
+    <div class="section-title">Топ товаров по выручке</div>
+    <div class="filters">
+      <input class="filter-input" id="topSearch" placeholder="Артикул / товар / бренд..." oninput="topFilter()">
+      <select class="filter-select" id="topLimitFilter" onchange="topLoad()">
+        <option value="20">Топ 20</option>
+        <option value="50">Топ 50</option>
+        <option value="100">Топ 100</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="topSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="topSort('nm_id')">АРТ WB ↕</th>
+          <th onclick="topSort('supplier_article')">АРТ ПОСТАВЩИКА ↕</th>
+          <th onclick="topSort('subject')">ТОВАР ↕</th>
+          <th onclick="topSort('brand')">БРЕНД ↕</th>
+          <th onclick="topSort('orders_count')">ЗАКАЗОВ ↕</th>
+          <th onclick="topSort('revenue')">ВЫРУЧКА ↕</th>
+        </tr></thead>
+        <tbody id="topBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="topPagination"></div>
+  </div>
+
+  <!-- Визуальный рейтинг -->
+  <div class="card" style="margin-top:16px">
+    <div class="section-title">Визуальный рейтинг</div>
+    <div class="top-products-list" id="topVisualList"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let data = [], filtered = [], page = 1;
+  const PER = 20;
+  let sortCol = 'revenue', sortDir = -1;
+
+  async function topLoad() {
+    const limit = document.getElementById('topLimitFilter')?.value || 20;
+    try {
+      const res = await fetch(`/api/dashboard/top-products?days_back=${WB.period}&limit=${limit}`);
+      data = await res.json();
+      populateGlobalCabSelects(data);
+    } catch(e) { data = []; }
+    topFilter();
+  }
+  window.topLoad = topLoad;
+
+  function topFilter() {
+    const search = (document.getElementById('topSearch')?.value || '').toLowerCase();
+    filtered = data.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (search && !`${r.supplier_article||''} ${r.subject||''} ${r.brand||''} ${r.nm_id||''}`.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortData();
+  }
+  window.topFilter = topFilter;
+
+  function topSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+    sortData();
+  }
+  window.topSort = topSort;
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = a[sortCol] ?? 0, vb = b[sortCol] ?? 0;
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    page = 1;
+    render();
+  }
+
+  function render() {
+    const body = document.getElementById('topBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:30px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Нет данных</td></tr>`;
+      document.getElementById('topPagination').innerHTML = '';
+    } else {
+      body.innerHTML = slice.map((r, i) => `<tr class="fade-in">
+        <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+        <td class="td-mono">${r.nm_id || '—'}</td>
+        <td>${r.supplier_article || '—'}</td>
+        <td>${r.subject || '—'}</td>
+        <td>${r.brand || '—'}</td>
+        <td class="td-mono" style="color:var(--accent3)">${fmt(r.orders_count)}</td>
+        <td class="td-mono" style="color:var(--accent)">${fmtMoney(Math.round(r.revenue))}</td>
+      </tr>`).join('');
+      renderPagination('topPagination', filtered.length, PER, page, p => { page = p; render(); });
+    }
+
+    // Визуальный список (топ 15)
+    const vList = document.getElementById('topVisualList');
+    if (!vList) return;
+    const maxRev = filtered.length ? Math.max(...filtered.map(r => r.revenue)) : 0;
+    vList.innerHTML = filtered.slice(0, 15).map(r => {
+      const pct = maxRev > 0 ? (r.revenue / maxRev * 100).toFixed(1) : 0;
+      const name = r.supplier_article || String(r.nm_id) || '—';
+      return `<div class="top-item fade-in">
+        <div class="top-item-info">
+          <div class="top-item-name">${name}${r.subject ? ' · ' + r.subject : ''}</div>
+          <div class="top-item-bar-wrap"><div class="top-item-bar" style="width:${pct}%"></div></div>
+        </div>
+        <div>
+          <div class="top-item-value">${fmt(Math.round(r.revenue))}</div>
+          <div class="top-item-sub">${fmt(r.orders_count)} заказов</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  window.addEventListener('wb:tab-activated:top', topLoad);
+  window.addEventListener('wb:cabinet-changed', () => { if (data.length) topFilter(); });
+})();
+</script>

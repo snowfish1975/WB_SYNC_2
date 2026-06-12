@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WB Sync — Дашборд</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/themes.css">
+<link rel="stylesheet" href="/static/base.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/static/js/core.js"></script>
+</head>
+<body>
+
+<!-- ============ ШАПКА ============ -->
+<header class="header">
+  <div class="header-left">
+    <div class="logo">WB SYNC <span>/ DASHBOARD</span></div>
+  </div>
+
+  <div class="header-center">
+    <!-- Глобальный фильтр кабинета -->
+    <div class="global-cab-wrap">
+      <span class="global-cab-label">Кабинет</span>
+      <select class="filter-select global-cab-select" onchange="setCabinet(this.value)">
+        <option value="">Все</option>
+      </select>
+    </div>
+
+    <!-- Период -->
+    <div class="period-selector">
+      <button class="period-btn" onclick="setPeriod(7, this)">7Д</button>
+      <button class="period-btn" onclick="setPeriod(14, this)">14Д</button>
+      <button class="period-btn" onclick="setPeriod(30, this)">30Д</button>
+      <button class="period-btn active" onclick="setPeriod(40, this)">40Д</button>
+    </div>
+  </div>
+
+  <div class="header-right">
+    <!-- Выбор темы -->
+    <div class="theme-selector">
+      <div class="theme-dot active" data-t="dark"     title="Dark"     onclick="applyTheme('dark')"></div>
+      <div class="theme-dot"        data-t="midnight" title="Midnight"  onclick="applyTheme('midnight')"></div>
+      <div class="theme-dot"        data-t="slate"    title="Slate"     onclick="applyTheme('slate')"></div>
+    </div>
+
+    <button class="sync-btn" onclick="triggerSync()">⟳ СИНХР</button>
+    <div class="last-sync" id="lastSync">—</div>
+  </div>
+</header>
+
+<!-- ============ НАВИГАЦИЯ ТАБОВ ============ -->
+<nav class="tabs-nav">
+  <button class="tab-btn" data-tab="summary"  onclick="switchTab('summary')">📊 Сводка</button>
+  <button class="tab-btn" data-tab="orders"   onclick="switchTab('orders')">🛒 Заказы</button>
+  <button class="tab-btn" data-tab="stocks"   onclick="switchTab('stocks')">📦 Остатки</button>
+  <button class="tab-btn" data-tab="top"      onclick="switchTab('top')">🏆 Топ товаров</button>
+  <button class="tab-btn" data-tab="report"   onclick="switchTab('report')">💰 Отчёт реализации</button>
+</nav>
+
+<!-- ============ КОНТЕНТ ТАБОВ ============ -->
+<div class="main">
+  <div id="tab-summary" class="tab-content"></div>
+  <div id="tab-orders"  class="tab-content"></div>
+  <div id="tab-stocks"  class="tab-content"></div>
+  <div id="tab-top"     class="tab-content"></div>
+  <div id="tab-report"  class="tab-content"></div>
+</div>
+
+<script src="/static/js/tabs.js"></script>
+<script>
+  // Загружаем последнюю синхронизацию при старте
+  document.addEventListener('DOMContentLoaded', loadLastSync);
+</script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!-- ============================================================
+     TAB: ОСТАТКИ
+     ============================================================ -->
+<div id="stocksTab">
+  <div class="card">
+    <div class="section-title">Остатки по складам</div>
+    <div class="filters">
+      <input class="filter-input" id="stockSearch" placeholder="Артикул WB..." oninput="stocksFilter()">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="stocksSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="stocksSort('nm_id')">АРТ WB ↕</th>
+          <th onclick="stocksSort('quantity')">НА СКЛАДЕ ↕</th>
+          <th onclick="stocksSort('in_way_to_client')">К КЛИЕНТУ ↕</th>
+          <th onclick="stocksSort('in_way_from_client')">ОТ КЛИЕНТА ↕</th>
+          <th>ИТОГО</th>
+        </tr></thead>
+        <tbody id="stocksBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="stocksPagination"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let data = [], filtered = [], page = 1;
+  const PER = 50;
+  let sortCol = 'quantity', sortDir = -1;
+
+  async function load() {
+    try {
+      const res = await fetch('/api/dashboard/stocks-summary');
+      data = await res.json();
+      populateGlobalCabSelects(data);
+    } catch(e) { data = []; }
+    stocksFilter();
+  }
+
+  function stocksFilter() {
+    const search = (document.getElementById('stockSearch')?.value || '').toLowerCase();
+    filtered = data.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (search && !String(r.nm_id).includes(search)) return false;
+      return true;
+    });
+    sortData();
+  }
+  window.stocksFilter = stocksFilter;
+
+  function stocksSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+    sortData();
+  }
+  window.stocksSort = stocksSort;
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = a[sortCol] ?? 0, vb = b[sortCol] ?? 0;
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    page = 1;
+    render();
+  }
+
+  function render() {
+    const body = document.getElementById('stocksBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:30px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Нет данных</td></tr>`;
+      document.getElementById('stocksPagination').innerHTML = '';
+      return;
+    }
+
+    body.innerHTML = slice.map(r => {
+      const total = (r.quantity||0) + (r.in_way_to_client||0) + (r.in_way_from_client||0);
+      const qColor = r.quantity === 0 ? 'var(--red)' : r.quantity < 5 ? 'var(--accent2)' : 'var(--green)';
+      return `<tr class="fade-in">
+        <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+        <td class="td-mono">${r.nm_id}</td>
+        <td class="td-mono" style="color:${qColor}">${fmt(r.quantity)}</td>
+        <td class="td-mono" style="color:var(--accent3)">${fmt(r.in_way_to_client)}</td>
+        <td class="td-mono" style="color:var(--text2)">${fmt(r.in_way_from_client)}</td>
+        <td class="td-mono">${fmt(total)}</td>
+      </tr>`;
+    }).join('');
+
+    renderPagination('stocksPagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  window.addEventListener('wb:tab-activated:stocks', load);
+  window.addEventListener('wb:cabinet-changed', () => { if (data.length) stocksFilter(); });
+})();
+</script>

@@ -1,0 +1,1361 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WB Sync — Дашборд</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --bg2: #111118;
+    --bg3: #1a1a24;
+    --border: #2a2a3a;
+    --accent: #ff6b35;
+    --accent2: #ffb347;
+    --accent3: #4ecdc4;
+    --text: #e8e8f0;
+    --text2: #8888aa;
+    --text3: #55556a;
+    --green: #44cf6c;
+    --red: #ff4757;
+    --card-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Шапка */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 28px;
+    letter-spacing: 3px;
+    color: var(--accent);
+    line-height: 1;
+  }
+
+  .logo span {
+    color: var(--text2);
+    font-size: 14px;
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 1px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .period-selector {
+    display: flex;
+    gap: 4px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px;
+  }
+
+  .period-btn {
+    padding: 5px 12px;
+    border: none;
+    background: transparent;
+    color: var(--text2);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.15s;
+  }
+
+  .period-btn.active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .sync-btn {
+    padding: 7px 16px;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s;
+    letter-spacing: 1px;
+  }
+
+  .sync-btn:hover { background: var(--accent); color: #fff; }
+
+  .last-sync {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text3);
+  }
+
+  /* Основной контейнер */
+  .main {
+    padding: 28px 32px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+
+  /* Сводные карточки */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: var(--card-shadow);
+    transition: border-color 0.2s;
+  }
+
+  .card:hover { border-color: var(--accent); }
+
+  .metric-card {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .metric-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+
+  .metric-card.orange::before { background: var(--accent); }
+  .metric-card.teal::before { background: var(--accent3); }
+  .metric-card.green::before { background: var(--green); }
+  .metric-card.red::before { background: var(--red); }
+  .metric-card.yellow::before { background: var(--accent2); }
+
+  .metric-label {
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--text3);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .metric-value {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 36px;
+    line-height: 1;
+    color: var(--text);
+    letter-spacing: 1px;
+  }
+
+  .metric-sub {
+    font-size: 11px;
+    color: var(--text2);
+    margin-top: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* Двухколоночная сетка */
+  .two-col {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  @media (max-width: 1100px) {
+    .two-col { grid-template-columns: 1fr; }
+  }
+
+  /* Секции */
+  .section-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 18px;
+    letter-spacing: 2px;
+    color: var(--text2);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Таблицы */
+  .table-wrap {
+    overflow-x: auto;
+    border-radius: 8px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead th {
+    background: var(--bg3);
+    color: var(--text3);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 10px 14px;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid var(--border);
+    transition: color 0.15s;
+  }
+
+  thead th:hover { color: var(--accent); }
+
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+
+  tbody tr:hover { background: var(--bg3); }
+
+  tbody td {
+    padding: 10px 14px;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .td-mono {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+  }
+
+  .badge-green { background: rgba(68,207,108,0.15); color: var(--green); }
+  .badge-red { background: rgba(255,71,87,0.15); color: var(--red); }
+  .badge-orange { background: rgba(255,107,53,0.15); color: var(--accent); }
+
+  /* Фильтры */
+  .filters {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .filter-input {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 6px 12px;
+    outline: none;
+    transition: border-color 0.15s;
+    min-width: 160px;
+  }
+
+  .filter-input:focus { border-color: var(--accent); }
+  .filter-input::placeholder { color: var(--text3); }
+
+  .filter-select {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 6px 12px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  /* Пагинация */
+  .pagination {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 14px;
+    justify-content: flex-end;
+  }
+
+  .page-btn {
+    padding: 5px 10px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.15s;
+  }
+
+  .page-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .page-btn:hover:not(.active) { border-color: var(--accent); color: var(--accent); }
+  .page-info { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text3); margin: 0 8px; }
+
+  /* График */
+  .chart-container {
+    position: relative;
+    height: 280px;
+  }
+
+  /* Топ товаров — горизонтальные бары */
+  .top-products-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  .top-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .top-item-info { min-width: 0; }
+
+  .top-item-name {
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
+  }
+
+  .top-item-bar-wrap {
+    height: 4px;
+    background: var(--bg3);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .top-item-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.5s ease;
+  }
+
+  .top-item-value {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16px;
+    color: var(--accent);
+    white-space: nowrap;
+    text-align: right;
+    min-width: 80px;
+  }
+
+  .top-item-sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text3);
+    text-align: right;
+  }
+
+  /* Кабинет-таб */
+  .cabinet-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+
+  .cab-tab {
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text2);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .cab-tab.active { border-color: var(--accent3); color: var(--accent3); background: rgba(78,205,196,0.08); }
+  .cab-tab:hover:not(.active) { border-color: var(--text2); }
+
+  /* Лоадер */
+  .loader {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    color: var(--text3);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    gap: 10px;
+  }
+
+  .loader-dot {
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  .loader-dot:nth-child(2) { animation-delay: 0.2s; }
+  .loader-dot:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.2; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1); }
+  }
+
+  /* Скроллбар */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg2); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+  /* Отчёт реализации */
+  .report-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .report-metric {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+  }
+
+  .report-metric-label {
+    font-size: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+
+  .report-metric-value {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 24px;
+    color: var(--text);
+  }
+
+  .report-metric-value.positive { color: var(--green); }
+  .report-metric-value.negative { color: var(--red); }
+
+  /* Анимация появления */
+  .fade-in {
+    animation: fadeIn 0.3s ease forwards;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .section-mb { margin-bottom: 28px; }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-left">
+    <div class="logo">WB SYNC <span>/ DASHBOARD</span></div>
+  </div>
+  <div class="header-right">
+    <div class="period-selector">
+      <button class="period-btn" onclick="setPeriod(7)">7Д</button>
+      <button class="period-btn" onclick="setPeriod(14)">14Д</button>
+      <button class="period-btn" onclick="setPeriod(30)">30Д</button>
+      <button class="period-btn active" onclick="setPeriod(40)">40Д</button>
+    </div>
+    <button class="sync-btn" onclick="triggerSync()">⟳ СИНХР</button>
+    <div class="last-sync" id="lastSync">загрузка...</div>
+  </div>
+</header>
+
+<main class="main">
+
+  <!-- Сводные цифры -->
+<div class="section-mb">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <div class="section-title" style="margin-bottom:0;flex:1">Сводка</div>
+    <select class="filter-select" id="summaryCabFilter" onchange="renderSummary()" style="margin-left:16px;">
+      <option value="">Все кабинеты</option>
+    </select>
+  </div>
+  <div class="summary-grid" id="summaryGrid">
+    <div class="loader"><div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div></div>
+  </div>
+</div>
+
+  <!-- График + Топ товаров -->
+  <div class="two-col section-mb">
+    <div class="card">
+      <div class="section-title">Продажи по дням</div>
+      <div class="cabinet-tabs" id="chartCabTabs"></div>
+      <div class="chart-container">
+        <canvas id="salesChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">Топ товаров</div>
+      <div class="cabinet-tabs" id="topCabTabs"></div>
+      <div class="top-products-list" id="topProductsList">
+        <div class="loader"><div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Заказы -->
+  <div class="card section-mb">
+    <div class="section-title">Заказы</div>
+    <div class="filters">
+      <input class="filter-input" id="orderSearch" placeholder="Артикул / товар / бренд..." oninput="filterOrders()">
+      <select class="filter-select" id="orderCabFilter" onchange="filterOrders()">
+        <option value="">Все кабинеты</option>
+      </select>
+      <select class="filter-select" id="orderCancelFilter" onchange="filterOrders()">
+        <option value="">Все статусы</option>
+        <option value="false">Активные</option>
+        <option value="true">Отменённые</option>
+      </select>
+      <select class="filter-select" id="orderDaysFilter" onchange="loadOrders()">
+        <option value="40">За 40 дней</option>
+        <option value="30">За 30 дней</option>
+        <option value="14">За 14 дней</option>
+        <option value="7">За 7 дней</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortOrders('date')">ДАТА ↕</th>
+            <th onclick="sortOrders('seller_name')">КАБИНЕТ ↕</th>
+            <th onclick="sortOrders('nm_id')">АРТИКУЛ WB ↕</th>
+            <th onclick="sortOrders('supplier_article')">АРТИКУЛ ↕</th>
+            <th onclick="sortOrders('subject')">ТОВАР ↕</th>
+            <th onclick="sortOrders('brand')">БРЕНД ↕</th>
+            <th onclick="sortOrders('price_with_disc')">ЦЕНА ↕</th>
+            <th onclick="sortOrders('is_cancel')">СТАТУС ↕</th>
+            <th onclick="sortOrders('region_name')">РЕГИОН ↕</th>
+          </tr>
+        </thead>
+        <tbody id="ordersBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="ordersPagination"></div>
+  </div>
+
+  <!-- Остатки -->
+  <div class="card section-mb">
+    <div class="section-title">Остатки</div>
+    <div class="filters">
+      <input class="filter-input" id="stockSearch" placeholder="Артикул WB..." oninput="filterStocks()">
+      <select class="filter-select" id="stockCabFilter" onchange="filterStocks()">
+        <option value="">Все кабинеты</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortStocks('seller_name')">КАБИНЕТ ↕</th>
+            <th onclick="sortStocks('nm_id')">АРТИКУЛ WB ↕</th>
+            <th onclick="sortStocks('quantity')">НА СКЛАДЕ ↕</th>
+            <th onclick="sortStocks('in_way_to_client')">К КЛИЕНТУ ↕</th>
+            <th onclick="sortStocks('in_way_from_client')">ОТ КЛИЕНТА ↕</th>
+            <th>ИТОГО ↕</th>
+          </tr>
+        </thead>
+        <tbody id="stocksBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="stocksPagination"></div>
+  </div>
+
+  <!-- Отчёт реализации -->
+  <div class="card section-mb">
+    <div class="section-title">Отчёт реализации (вчера)</div>
+    <div class="report-summary-grid" id="reportSummary"></div>
+    <div class="filters">
+      <input class="filter-input" id="reportSearch" placeholder="Артикул / товар..." oninput="filterReport()">
+      <select class="filter-select" id="reportCabFilter" onchange="filterReport()">
+        <option value="">Все кабинеты</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortReport('seller_name')">КАБИНЕТ ↕</th>
+            <th onclick="sortReport('nm_id')">АРТИКУЛ WB ↕</th>
+            <th onclick="sortReport('sa_name')">АРТ ПОСТАВЩИКА ↕</th>
+            <th onclick="sortReport('subject_name')">ТОВАР ↕</th>
+            <th onclick="sortReport('retail_amount')">ВЫРУЧКА ↕</th>
+            <th onclick="sortReport('for_pay')">К ПЕРЕЧИСЛЕНИЮ ↕</th>
+            <th onclick="sortReport('commission')">КОМИССИЯ WB ↕</th>
+            <th onclick="sortReport('delivery')">ЛОГИСТИКА ↕</th>
+            <th onclick="sortReport('storage')">ХРАНЕНИЕ ↕</th>
+            <th onclick="sortReport('penalty')">ШТРАФЫ ↕</th>
+          </tr>
+        </thead>
+        <tbody id="reportBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="reportPagination"></div>
+  </div>
+
+</main>
+
+<script>
+// ============================================================
+// СОСТОЯНИЕ
+// ============================================================
+let currentPeriod = 40;
+let salesChartInstance = null;
+
+let ordersData = [];
+let ordersFiltered = [];
+let ordersPage = 1;
+const ordersPerPage = 50;
+let ordersSortCol = 'date';
+let ordersSortDir = -1;
+
+let stocksData = [];
+let stocksFiltered = [];
+let stocksPage = 1;
+const stocksPerPage = 50;
+let stocksSortCol = 'quantity';
+let stocksSortDir = -1;
+
+let reportData = [];
+let reportFiltered = [];
+let reportPage = 1;
+const reportPerPage = 50;
+let reportSortCol = 'for_pay';
+let reportSortDir = -1;
+
+let chartData = [];
+let chartActiveCab = 'all';
+
+let topData = [];
+let topActiveCab = 'all';
+
+// ============================================================
+// УТИЛИТЫ
+// ============================================================
+function fmt(n) {
+  if (n == null) return '—';
+  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n);
+}
+
+function fmtMoney(n) {
+  if (n == null) return '—';
+  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n) + ' ₽';
+}
+
+function fmtDate(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' +
+         d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function loader(html) {
+  return `<div class="loader"><div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div><span style="margin-left:8px;color:var(--text3);font-family:'IBM Plex Mono',monospace;font-size:12px;">${html}</span></div>`;
+}
+
+// ============================================================
+// ПЕРИОД
+// ============================================================
+function setPeriod(days) {
+  currentPeriod = days;
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  loadAll();
+}
+
+// ============================================================
+// ЗАГРУЗКА ВСЕХ ДАННЫХ
+// ============================================================
+function loadAll() {
+  loadSummary();
+  loadChart();
+  loadTopProducts();
+  loadOrders();
+  loadStocks();
+  loadSalesReport();
+  loadLastSync();
+}
+
+// ============================================================
+// СВОДКА
+// ============================================================
+let summaryData = [];
+
+async function loadSummary() {
+  const grid = document.getElementById('summaryGrid');
+  grid.innerHTML = loader('Загрузка...');
+  try {
+    const res = await fetch(`/api/dashboard/summary?days_back=${currentPeriod}`);
+    summaryData = await res.json();
+
+    // Заполняем селектор кабинетов
+    const sel = document.getElementById('summaryCabFilter');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Все кабинеты</option>';
+    for (const r of summaryData) {
+      sel.innerHTML += `<option value="${r.cabinet_id}" ${cur === r.cabinet_id ? 'selected' : ''}>${r.seller_name}</option>`;
+    }
+
+    renderSummary();
+  } catch(e) {
+    grid.innerHTML = `<div style="color:var(--red);padding:20px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Ошибка загрузки: ${e.message}</div>`;
+  }
+}
+
+function renderSummary() {
+  const grid = document.getElementById('summaryGrid');
+  const cabFilter = document.getElementById('summaryCabFilter').value;
+
+  const data = cabFilter
+    ? summaryData.filter(r => r.cabinet_id === cabFilter)
+    : summaryData;
+
+  let totalOrders = 0, totalRevenue = 0, totalCancels = 0;
+  for (const r of data) {
+    totalOrders += r.total_orders;
+    totalRevenue += r.revenue;
+    totalCancels += r.cancels;
+  }
+  const cancelRate = totalOrders > 0 ? ((totalCancels / totalOrders) * 100).toFixed(1) : 0;
+  const activeName = cabFilter ? data[0]?.seller_name : null;
+
+  let html = '';
+  html += `<div class="card metric-card orange fade-in">
+    <div class="metric-label">ВЫРУЧКА</div>
+    <div class="metric-value">${fmt(Math.round(totalRevenue))}</div>
+    <div class="metric-sub">₽ за ${currentPeriod} дней${activeName ? ' · ' + activeName : ''}</div>
+  </div>`;
+  html += `<div class="card metric-card teal fade-in">
+    <div class="metric-label">ЗАКАЗЫ</div>
+    <div class="metric-value">${fmt(totalOrders)}</div>
+    <div class="metric-sub">активных + отменённых</div>
+  </div>`;
+  html += `<div class="card metric-card red fade-in">
+    <div class="metric-label">ОТМЕНЫ</div>
+    <div class="metric-value">${fmt(totalCancels)}</div>
+    <div class="metric-sub">${cancelRate}% от заказов</div>
+  </div>`;
+  html += `<div class="card metric-card green fade-in">
+    <div class="metric-label">АКТИВНЫЕ</div>
+    <div class="metric-value">${fmt(totalOrders - totalCancels)}</div>
+    <div class="metric-sub">без отмен</div>
+  </div>`;
+
+  // Карточки по кабинетам показываем только если выбраны все
+  if (!cabFilter && summaryData.length > 1) {
+    for (const r of summaryData) {
+      html += `<div class="card metric-card yellow fade-in">
+        <div class="metric-label">${r.seller_name}</div>
+        <div class="metric-value">${fmt(Math.round(r.revenue))}</div>
+        <div class="metric-sub">₽ / ${fmt(r.total_orders - r.cancels)} заказов</div>
+      </div>`;
+    }
+  }
+
+  grid.innerHTML = html;
+}
+
+// ============================================================
+// ГРАФИК ПРОДАЖ
+// ============================================================
+async function loadChart() {
+  try {
+    const res = await fetch(`/api/dashboard/sales-chart?days_back=${currentPeriod}`);
+    chartData = await res.json();
+    renderChartTabs();
+    renderChart();
+  } catch(e) { console.error(e); }
+}
+
+function renderChartTabs() {
+  const cabs = [...new Set(chartData.map(r => r.seller_name))];
+  const tabs = document.getElementById('chartCabTabs');
+  if (cabs.length <= 1) { tabs.innerHTML = ''; return; }
+  let html = `<button class="cab-tab ${chartActiveCab === 'all' ? 'active' : ''}" onclick="setChartCab('all')">ВСЕ</button>`;
+  for (const c of cabs) {
+    html += `<button class="cab-tab ${chartActiveCab === c ? 'active' : ''}" onclick="setChartCab('${c}')">${c}</button>`;
+  }
+  tabs.innerHTML = html;
+}
+
+function setChartCab(cab) {
+  chartActiveCab = cab;
+  renderChartTabs();
+  renderChart();
+}
+
+function renderChart() {
+  const filtered = chartActiveCab === 'all' ? chartData : chartData.filter(r => r.seller_name === chartActiveCab);
+
+  // Группируем по дню
+  const byDay = {};
+  for (const r of filtered) {
+    if (!byDay[r.day]) byDay[r.day] = { orders: 0, revenue: 0 };
+    byDay[r.day].orders += r.orders_count;
+    byDay[r.day].revenue += r.revenue;
+  }
+
+  const days = Object.keys(byDay).sort();
+  const revenues = days.map(d => byDay[d].revenue);
+  const orders = days.map(d => byDay[d].orders);
+
+  const labels = days.map(d => {
+    const dt = new Date(d);
+    return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  });
+
+  const ctx = document.getElementById('salesChart').getContext('2d');
+  if (salesChartInstance) salesChartInstance.destroy();
+
+  salesChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Выручка ₽',
+          data: revenues,
+          backgroundColor: 'rgba(255,107,53,0.7)',
+          borderColor: 'rgba(255,107,53,1)',
+          borderWidth: 1,
+          borderRadius: 3,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Заказы',
+          data: orders,
+          type: 'line',
+          borderColor: 'rgba(78,205,196,0.9)',
+          backgroundColor: 'rgba(78,205,196,0.1)',
+          borderWidth: 2,
+          pointRadius: 3,
+          pointBackgroundColor: 'rgba(78,205,196,1)',
+          tension: 0.3,
+          fill: false,
+          yAxisID: 'y2',
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#8888aa', font: { family: 'IBM Plex Mono', size: 11 } }
+        },
+        tooltip: {
+          backgroundColor: '#1a1a24',
+          borderColor: '#2a2a3a',
+          borderWidth: 1,
+          titleColor: '#e8e8f0',
+          bodyColor: '#8888aa',
+          callbacks: {
+            label: ctx => ctx.dataset.label === 'Выручка ₽'
+              ? ` ${fmt(ctx.raw)} ₽`
+              : ` ${fmt(ctx.raw)} заказов`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(42,42,58,0.5)' },
+          ticks: { color: '#55556a', font: { family: 'IBM Plex Mono', size: 10 }, maxRotation: 45 }
+        },
+        y: {
+          grid: { color: 'rgba(42,42,58,0.5)' },
+          ticks: { color: '#8888aa', font: { family: 'IBM Plex Mono', size: 10 }, callback: v => fmt(v) }
+        },
+        y2: {
+          position: 'right',
+          grid: { display: false },
+          ticks: { color: '#4ecdc4', font: { family: 'IBM Plex Mono', size: 10 } }
+        }
+      }
+    }
+  });
+}
+
+// ============================================================
+// ТОП ТОВАРОВ
+// ============================================================
+async function loadTopProducts() {
+  document.getElementById('topProductsList').innerHTML = loader('');
+  try {
+    const res = await fetch(`/api/dashboard/top-products?days_back=${currentPeriod}&limit=20`);
+    topData = await res.json();
+    renderTopTabs();
+    renderTopProducts();
+  } catch(e) { console.error(e); }
+}
+
+function renderTopTabs() {
+  const cabs = [...new Set(topData.map(r => r.seller_name))];
+  const tabs = document.getElementById('topCabTabs');
+  if (cabs.length <= 1) { tabs.innerHTML = ''; return; }
+  let html = `<button class="cab-tab ${topActiveCab === 'all' ? 'active' : ''}" onclick="setTopCab('all')">ВСЕ</button>`;
+  for (const c of cabs) {
+    html += `<button class="cab-tab ${topActiveCab === c ? 'active' : ''}" onclick="setTopCab('${c}')">${c}</button>`;
+  }
+  tabs.innerHTML = html;
+}
+
+function setTopCab(cab) {
+  topActiveCab = cab;
+  renderTopTabs();
+  renderTopProducts();
+}
+
+function renderTopProducts() {
+  const list = document.getElementById('topProductsList');
+  const filtered = topActiveCab === 'all' ? topData : topData.filter(r => r.seller_name === topActiveCab);
+  if (!filtered.length) { list.innerHTML = '<div class="loader">Нет данных</div>'; return; }
+
+  const maxRev = Math.max(...filtered.map(r => r.revenue));
+  let html = '';
+  for (const r of filtered.slice(0, 15)) {
+    const pct = maxRev > 0 ? (r.revenue / maxRev * 100).toFixed(1) : 0;
+    const name = r.supplier_article || r.nm_id || '—';
+    const subj = r.subject || '';
+    html += `<div class="top-item fade-in">
+      <div class="top-item-info">
+        <div class="top-item-name">${name} ${subj ? '· ' + subj : ''}</div>
+        <div class="top-item-bar-wrap"><div class="top-item-bar" style="width:${pct}%"></div></div>
+      </div>
+      <div>
+        <div class="top-item-value">${fmt(Math.round(r.revenue))}</div>
+        <div class="top-item-sub">${fmt(r.orders_count)} заказов</div>
+      </div>
+    </div>`;
+  }
+  list.innerHTML = html;
+}
+
+// ============================================================
+// ЗАКАЗЫ
+// ============================================================
+async function loadOrders() {
+  document.getElementById('ordersBody').innerHTML = '';
+  const days = document.getElementById('orderDaysFilter').value;
+  try {
+    const res = await fetch(`/api/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: '__all__' })
+    });
+
+    // Используем dashboard endpoint
+    const res2 = await fetch(`/api/dashboard/orders-raw?days_back=${days}`);
+    if (!res2.ok) throw new Error('no endpoint');
+    ordersData = await res2.json();
+  } catch(e) {
+    // Фоллбэк — пробуем через /api/orders без токена (возможно вернёт пустой массив)
+    ordersData = [];
+  }
+  filterOrders();
+  populateCabFilters();
+}
+
+function filterOrders() {
+  const search = document.getElementById('orderSearch').value.toLowerCase();
+  const cab = document.getElementById('orderCabFilter').value;
+  const cancel = document.getElementById('orderCancelFilter').value;
+
+  ordersFiltered = ordersData.filter(r => {
+    if (search && !`${r.supplier_article||''} ${r.subject||''} ${r.brand||''} ${r.nm_id||''}`.toLowerCase().includes(search)) return false;
+    if (cab && r.seller_name !== cab) return false;
+    if (cancel !== '' && String(r.is_cancel) !== cancel) return false;
+    return true;
+  });
+
+  sortOrdersData();
+}
+
+function sortOrders(col) {
+  if (ordersSortCol === col) ordersSortDir *= -1;
+  else { ordersSortCol = col; ordersSortDir = -1; }
+  sortOrdersData();
+}
+
+function sortOrdersData() {
+  ordersFiltered.sort((a, b) => {
+    let va = a[ordersSortCol], vb = b[ordersSortCol];
+    if (va == null) va = '';
+    if (vb == null) vb = '';
+    if (typeof va === 'string') return va.localeCompare(vb) * ordersSortDir;
+    return (va - vb) * ordersSortDir;
+  });
+  ordersPage = 1;
+  renderOrders();
+}
+
+function renderOrders() {
+  const start = (ordersPage - 1) * ordersPerPage;
+  const page = ordersFiltered.slice(start, start + ordersPerPage);
+  const body = document.getElementById('ordersBody');
+
+  if (!ordersFiltered.length) {
+    body.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:30px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Нет данных</td></tr>`;
+    document.getElementById('ordersPagination').innerHTML = '';
+    return;
+  }
+
+  body.innerHTML = page.map(r => `
+    <tr class="fade-in">
+      <td class="td-mono">${fmtDate(r.date)}</td>
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td class="td-mono">${r.nm_id || '—'}</td>
+      <td>${r.supplier_article || '—'}</td>
+      <td>${r.subject || '—'}</td>
+      <td>${r.brand || '—'}</td>
+      <td class="td-mono">${fmtMoney(r.price_with_disc)}</td>
+      <td><span class="badge ${r.is_cancel ? 'badge-red' : 'badge-green'}">${r.is_cancel ? 'ОТМЕНА' : 'АКТИВЕН'}</span></td>
+      <td style="color:var(--text2)">${r.region_name || '—'}</td>
+    </tr>
+  `).join('');
+
+  renderPagination('ordersPagination', ordersFiltered.length, ordersPerPage, ordersPage, p => { ordersPage = p; renderOrders(); });
+}
+
+// ============================================================
+// ОСТАТКИ
+// ============================================================
+async function loadStocks() {
+  try {
+    const res = await fetch('/api/dashboard/stocks-summary');
+    stocksData = await res.json();
+    filterStocks();
+    populateCabFilters();
+  } catch(e) { console.error(e); }
+}
+
+function filterStocks() {
+  const search = document.getElementById('stockSearch').value.toLowerCase();
+  const cab = document.getElementById('stockCabFilter').value;
+
+  stocksFiltered = stocksData.filter(r => {
+    if (search && !String(r.nm_id).includes(search)) return false;
+    if (cab && r.seller_name !== cab) return false;
+    return true;
+  });
+
+  sortStocksData();
+}
+
+function sortStocks(col) {
+  if (stocksSortCol === col) stocksSortDir *= -1;
+  else { stocksSortCol = col; stocksSortDir = -1; }
+  sortStocksData();
+}
+
+function sortStocksData() {
+  stocksFiltered.sort((a, b) => {
+    let va = a[stocksSortCol], vb = b[stocksSortCol];
+    if (va == null) va = 0;
+    if (vb == null) vb = 0;
+    if (typeof va === 'string') return va.localeCompare(vb) * stocksSortDir;
+    return (va - vb) * stocksSortDir;
+  });
+  stocksPage = 1;
+  renderStocks();
+}
+
+function renderStocks() {
+  const start = (stocksPage - 1) * stocksPerPage;
+  const page = stocksFiltered.slice(start, start + stocksPerPage);
+  const body = document.getElementById('stocksBody');
+
+  if (!stocksFiltered.length) {
+    body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:30px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Нет данных</td></tr>`;
+    document.getElementById('stocksPagination').innerHTML = '';
+    return;
+  }
+
+  body.innerHTML = page.map(r => {
+    const total = (r.quantity || 0) + (r.in_way_to_client || 0) + (r.in_way_from_client || 0);
+    const qtyColor = r.quantity === 0 ? 'var(--red)' : r.quantity < 5 ? 'var(--accent2)' : 'var(--green)';
+    return `<tr class="fade-in">
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td class="td-mono">${r.nm_id}</td>
+      <td class="td-mono" style="color:${qtyColor}">${fmt(r.quantity)}</td>
+      <td class="td-mono" style="color:var(--accent3)">${fmt(r.in_way_to_client)}</td>
+      <td class="td-mono" style="color:var(--text2)">${fmt(r.in_way_from_client)}</td>
+      <td class="td-mono">${fmt(total)}</td>
+    </tr>`;
+  }).join('');
+
+  renderPagination('stocksPagination', stocksFiltered.length, stocksPerPage, stocksPage, p => { stocksPage = p; renderStocks(); });
+}
+
+// ============================================================
+// ОТЧЁТ РЕАЛИЗАЦИИ
+// ============================================================
+async function loadSalesReport() {
+  try {
+    const res = await fetch('/api/dashboard/sales-report-summary');
+    reportData = await res.json();
+
+    // Сводные метрики
+    let totalRetail = 0, totalForPay = 0, totalComm = 0, totalDel = 0, totalStorage = 0, totalPenalty = 0;
+    for (const r of reportData) {
+      totalRetail += r.retail_amount || 0;
+      totalForPay += r.for_pay || 0;
+      totalComm += r.commission || 0;
+      totalDel += r.delivery || 0;
+      totalStorage += r.storage || 0;
+      totalPenalty += r.penalty || 0;
+    }
+
+    document.getElementById('reportSummary').innerHTML = `
+      <div class="report-metric"><div class="report-metric-label">ВЫРУЧКА</div><div class="report-metric-value">${fmtMoney(Math.round(totalRetail))}</div></div>
+      <div class="report-metric"><div class="report-metric-label">К ПЕРЕЧИСЛЕНИЮ</div><div class="report-metric-value positive">${fmtMoney(Math.round(totalForPay))}</div></div>
+      <div class="report-metric"><div class="report-metric-label">КОМИССИЯ WB</div><div class="report-metric-value negative">${fmtMoney(Math.round(totalComm))}</div></div>
+      <div class="report-metric"><div class="report-metric-label">ЛОГИСТИКА</div><div class="report-metric-value negative">${fmtMoney(Math.round(totalDel))}</div></div>
+      <div class="report-metric"><div class="report-metric-label">ХРАНЕНИЕ</div><div class="report-metric-value negative">${fmtMoney(Math.round(totalStorage))}</div></div>
+      <div class="report-metric"><div class="report-metric-label">ШТРАФЫ</div><div class="report-metric-value negative">${fmtMoney(Math.round(totalPenalty))}</div></div>
+    `;
+
+    filterReport();
+    populateCabFilters();
+  } catch(e) { console.error(e); }
+}
+
+function filterReport() {
+  const search = document.getElementById('reportSearch').value.toLowerCase();
+  const cab = document.getElementById('reportCabFilter').value;
+
+  reportFiltered = reportData.filter(r => {
+    if (search && !`${r.sa_name||''} ${r.subject_name||''} ${r.nm_id||''}`.toLowerCase().includes(search)) return false;
+    if (cab && r.seller_name !== cab) return false;
+    return true;
+  });
+
+  sortReportData();
+}
+
+function sortReport(col) {
+  if (reportSortCol === col) reportSortDir *= -1;
+  else { reportSortCol = col; reportSortDir = -1; }
+  sortReportData();
+}
+
+function sortReportData() {
+  reportFiltered.sort((a, b) => {
+    let va = a[reportSortCol], vb = b[reportSortCol];
+    if (va == null) va = 0;
+    if (vb == null) vb = 0;
+    if (typeof va === 'string') return va.localeCompare(vb) * reportSortDir;
+    return (va - vb) * reportSortDir;
+  });
+  reportPage = 1;
+  renderReport();
+}
+
+function renderReport() {
+  const start = (reportPage - 1) * reportPerPage;
+  const page = reportFiltered.slice(start, start + reportPerPage);
+  const body = document.getElementById('reportBody');
+
+  if (!reportFiltered.length) {
+    body.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:30px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Нет данных — отчёт загружается в 10:30 МСК</td></tr>`;
+    document.getElementById('reportPagination').innerHTML = '';
+    return;
+  }
+
+  body.innerHTML = page.map(r => `
+    <tr class="fade-in">
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td class="td-mono">${r.nm_id || '—'}</td>
+      <td>${r.sa_name || '—'}</td>
+      <td>${r.subject_name || '—'}</td>
+      <td class="td-mono">${fmtMoney(r.retail_amount)}</td>
+      <td class="td-mono" style="color:var(--green)">${fmtMoney(r.for_pay)}</td>
+      <td class="td-mono" style="color:var(--red)">${fmtMoney(r.commission)}</td>
+      <td class="td-mono" style="color:var(--text2)">${fmtMoney(r.delivery)}</td>
+      <td class="td-mono" style="color:var(--text2)">${fmtMoney(r.storage)}</td>
+      <td class="td-mono" style="color:${r.penalty > 0 ? 'var(--red)' : 'var(--text3)'}">${fmtMoney(r.penalty)}</td>
+    </tr>
+  `).join('');
+
+  renderPagination('reportPagination', reportFiltered.length, reportPerPage, reportPage, p => { reportPage = p; renderReport(); });
+}
+
+// ============================================================
+// ПАГИНАЦИЯ
+// ============================================================
+function renderPagination(containerId, total, perPage, currentPage, onPage) {
+  const totalPages = Math.ceil(total / perPage);
+  const el = document.getElementById(containerId);
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+
+  let html = `<span class="page-info">${(currentPage-1)*perPage+1}–${Math.min(currentPage*perPage,total)} из ${fmt(total)}</span>`;
+
+  const pages = [];
+  pages.push(1);
+  for (let p = currentPage - 2; p <= currentPage + 2; p++) if (p > 1 && p < totalPages) pages.push(p);
+  pages.push(totalPages);
+  const uniq = [...new Set(pages)].sort((a,b)=>a-b);
+
+  if (currentPage > 1) html += `<button class="page-btn" onclick="(${onPage})(${currentPage-1})">←</button>`;
+
+  let prev = 0;
+  for (const p of uniq) {
+    if (p - prev > 1) html += `<span class="page-info">…</span>`;
+    html += `<button class="page-btn ${p === currentPage ? 'active' : ''}" onclick="(${onPage})(${p})">${p}</button>`;
+    prev = p;
+  }
+
+  if (currentPage < totalPages) html += `<button class="page-btn" onclick="(${onPage})(${currentPage+1})">→</button>`;
+
+  el.innerHTML = html;
+}
+
+// ============================================================
+// КАБИНЕТ-ФИЛЬТРЫ
+// ============================================================
+function populateCabFilters() {
+  const cabs = new Set();
+  [...ordersData, ...stocksData, ...reportData].forEach(r => { if (r.seller_name) cabs.add(r.seller_name); });
+
+  const selects = ['orderCabFilter', 'stockCabFilter', 'reportCabFilter'];
+  for (const id of selects) {
+    const sel = document.getElementById(id);
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Все кабинеты</option>';
+    for (const c of cabs) {
+      sel.innerHTML += `<option value="${c}" ${cur === c ? 'selected' : ''}>${c}</option>`;
+    }
+  }
+}
+
+// ============================================================
+// ПОСЛЕДНЯЯ СИНХРОНИЗАЦИЯ
+// ============================================================
+async function loadLastSync() {
+  try {
+    const res = await fetch('/api/logs');
+    const logs = await res.json();
+    if (logs.length) {
+      const last = logs[0];
+      const d = new Date(last.created_at);
+      document.getElementById('lastSync').textContent = 'синхр: ' + d.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    }
+  } catch(e) {}
+}
+
+// ============================================================
+// РУЧНАЯ СИНХРОНИЗАЦИЯ
+// ============================================================
+async function triggerSync() {
+  const btn = document.querySelector('.sync-btn');
+  btn.textContent = '⟳ ЗАПУСК...';
+  btn.disabled = true;
+  try {
+    await fetch('/api/sync/trigger', { method: 'POST' });
+    btn.textContent = '✓ ЗАПУЩЕНО';
+    setTimeout(() => { btn.textContent = '⟳ СИНХР'; btn.disabled = false; }, 3000);
+  } catch(e) {
+    btn.textContent = '✗ ОШИБКА';
+    setTimeout(() => { btn.textContent = '⟳ СИНХР'; btn.disabled = false; }, 3000);
+  }
+}
+
+// ============================================================
+// ЗАКАЗЫ — специальный эндпоинт нужен, пока показываем пустую таблицу
+// с подсказкой
+// ============================================================
+async function loadOrdersFromDashboard() {
+  const days = document.getElementById('orderDaysFilter').value || 40;
+  try {
+    const res = await fetch(`/api/dashboard/orders-raw?days_back=${days}`);
+    if (res.ok) {
+      ordersData = await res.json();
+    } else {
+      ordersData = [];
+    }
+  } catch(e) {
+    ordersData = [];
+  }
+  filterOrders();
+}
+
+// ============================================================
+// СТАРТ
+// ============================================================
+window.addEventListener('DOMContentLoaded', () => {
+  // Переопределяем loadOrders на правильный вариант
+  window.loadOrders = loadOrdersFromDashboard;
+  loadAll();
+  // Автообновление каждые 5 минут
+  setInterval(loadAll, 5 * 60 * 1000);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,244 @@
+<!-- ============================================================
+     TAB: СВОДКА
+     Слушает: wb:tab-activated:summary, wb:period-changed, wb:cabinet-changed
+     ============================================================ -->
+
+<div id="summaryTab">
+  <div class="section-mb">
+    <div class="section-title">Сводка</div>
+    <div class="summary-grid" id="summaryGrid">
+      <div class="loader"><div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div></div>
+    </div>
+  </div>
+
+  <div class="two-col section-mb">
+    <div class="card">
+      <div class="section-title">Продажи по дням</div>
+      <div class="chart-container">
+        <canvas id="salesChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">Топ товаров (превью)</div>
+      <div class="top-products-list" id="summaryTopList">
+        <div class="loader"><div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let summaryData = [];
+  let chartData = [];
+  let topData = [];
+  let chartInstance = null;
+
+  async function load() {
+    const period = WB.period;
+    const cab = WB.cabinet;
+
+    // Сводка
+    const grid = document.getElementById('summaryGrid');
+    grid.innerHTML = loaderHTML('');
+    try {
+      const res = await fetch(`/api/dashboard/summary?days_back=${period}`);
+      summaryData = await res.json();
+      populateGlobalCabSelects(summaryData);
+      renderSummary();
+    } catch(e) {
+      grid.innerHTML = `<div style="color:var(--red);padding:20px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Ошибка: ${e.message}</div>`;
+    }
+
+    // График
+    try {
+      const r2 = await fetch(`/api/dashboard/sales-chart?days_back=${period}`);
+      chartData = await r2.json();
+      renderChart();
+    } catch(e) {}
+
+    // Топ (превью — топ 8)
+    try {
+      const r3 = await fetch(`/api/dashboard/top-products?days_back=${period}&limit=8`);
+      topData = await r3.json();
+      renderSummaryTop();
+    } catch(e) {}
+  }
+
+  function renderSummary() {
+    const grid = document.getElementById('summaryGrid');
+    const data = WB.cabinet
+      ? summaryData.filter(r => r.cabinet_id === WB.cabinet)
+      : summaryData;
+
+    let totalOrders = 0, totalRevenue = 0, totalCancels = 0;
+    for (const r of data) {
+      totalOrders  += r.total_orders;
+      totalRevenue += r.revenue;
+      totalCancels += r.cancels;
+    }
+    const cancelRate = totalOrders > 0 ? ((totalCancels / totalOrders) * 100).toFixed(1) : 0;
+    const periodLabel = `за ${WB.period} дн.`;
+
+    let html = `
+      <div class="card metric-card orange fade-in">
+        <div class="metric-label">ВЫРУЧКА</div>
+        <div class="metric-value">${fmt(Math.round(totalRevenue))}</div>
+        <div class="metric-sub">₽ ${periodLabel}</div>
+      </div>
+      <div class="card metric-card teal fade-in">
+        <div class="metric-label">ЗАКАЗЫ</div>
+        <div class="metric-value">${fmt(totalOrders)}</div>
+        <div class="metric-sub">всего за период</div>
+      </div>
+      <div class="card metric-card green fade-in">
+        <div class="metric-label">АКТИВНЫЕ</div>
+        <div class="metric-value">${fmt(totalOrders - totalCancels)}</div>
+        <div class="metric-sub">без отмен</div>
+      </div>
+      <div class="card metric-card red fade-in">
+        <div class="metric-label">ОТМЕНЫ</div>
+        <div class="metric-value">${fmt(totalCancels)}</div>
+        <div class="metric-sub">${cancelRate}% от заказов</div>
+      </div>`;
+
+    // Если выбраны все и кабинетов > 1 — показываем разбивку
+    if (!WB.cabinet && summaryData.length > 1) {
+      for (const r of summaryData) {
+        html += `<div class="card metric-card yellow fade-in">
+          <div class="metric-label">${r.seller_name}</div>
+          <div class="metric-value">${fmt(Math.round(r.revenue))}</div>
+          <div class="metric-sub">₽ / ${fmt(r.total_orders - r.cancels)} заказов</div>
+        </div>`;
+      }
+    }
+    grid.innerHTML = html;
+  }
+
+  function renderChart() {
+    const filtered = WB.cabinet
+      ? chartData.filter(r => r.cabinet_id === WB.cabinet)
+      : chartData;
+
+    const byDay = {};
+    for (const r of filtered) {
+      if (!byDay[r.day]) byDay[r.day] = { orders: 0, revenue: 0 };
+      byDay[r.day].orders  += r.orders_count;
+      byDay[r.day].revenue += r.revenue;
+    }
+    const days     = Object.keys(byDay).sort();
+    const revenues = days.map(d => byDay[d].revenue);
+    const orders   = days.map(d => byDay[d].orders);
+    const labels   = days.map(d => {
+      const dt = new Date(d);
+      return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+    });
+
+    const ctx = document.getElementById('salesChart');
+    if (!ctx) return;
+    if (chartInstance) chartInstance.destroy();
+
+    chartInstance = new Chart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Выручка ₽',
+            data: revenues,
+            backgroundColor: 'rgba(255,107,53,0.75)',
+            borderColor: 'rgba(255,107,53,1)',
+            borderWidth: 1,
+            borderRadius: 3,
+            yAxisID: 'y',
+          },
+          {
+            label: 'Заказы',
+            data: orders,
+            type: 'line',
+            borderColor: 'rgba(78,205,196,0.9)',
+            backgroundColor: 'rgba(78,205,196,0.08)',
+            borderWidth: 2,
+            pointRadius: 3,
+            pointBackgroundColor: 'rgba(78,205,196,1)',
+            tension: 0.3,
+            fill: false,
+            yAxisID: 'y2',
+          }
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { labels: { color: 'var(--text2)', font: { family: 'IBM Plex Mono', size: 11 } } },
+          tooltip: {
+            backgroundColor: 'var(--bg3)',
+            borderColor: 'var(--border)',
+            borderWidth: 1,
+            titleColor: 'var(--text)',
+            bodyColor: 'var(--text2)',
+            callbacks: {
+              label: ctx => ctx.dataset.label === 'Выручка ₽'
+                ? ` ${fmt(ctx.raw)} ₽`
+                : ` ${fmt(ctx.raw)} заказов`
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: 'rgba(42,42,58,0.5)' },
+            ticks: { color: '#55556a', font: { family: 'IBM Plex Mono', size: 10 }, maxRotation: 45 }
+          },
+          y: {
+            grid: { color: 'rgba(42,42,58,0.4)' },
+            ticks: { color: '#8888aa', font: { family: 'IBM Plex Mono', size: 10 }, callback: v => fmt(v) }
+          },
+          y2: {
+            position: 'right',
+            grid: { display: false },
+            ticks: { color: '#4ecdc4', font: { family: 'IBM Plex Mono', size: 10 } }
+          }
+        },
+      }
+    });
+  }
+
+  function renderSummaryTop() {
+    const list = document.getElementById('summaryTopList');
+    if (!list) return;
+    const filtered = WB.cabinet
+      ? topData.filter(r => r.cabinet_id === WB.cabinet)
+      : topData;
+
+    if (!filtered.length) { list.innerHTML = '<div class="loader">Нет данных</div>'; return; }
+
+    const maxRev = Math.max(...filtered.map(r => r.revenue));
+    list.innerHTML = filtered.slice(0, 8).map(r => {
+      const pct = maxRev > 0 ? (r.revenue / maxRev * 100).toFixed(1) : 0;
+      const name = r.supplier_article || r.nm_id || '—';
+      return `<div class="top-item fade-in">
+        <div class="top-item-info">
+          <div class="top-item-name">${name}${r.subject ? ' · ' + r.subject : ''}</div>
+          <div class="top-item-bar-wrap"><div class="top-item-bar" style="width:${pct}%"></div></div>
+        </div>
+        <div>
+          <div class="top-item-value">${fmt(Math.round(r.revenue))}</div>
+          <div class="top-item-sub">${fmt(r.orders_count)} заказов</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Слушаем события
+  window.addEventListener('wb:tab-activated:summary', () => {
+    load();
+  });
+  window.addEventListener('wb:cabinet-changed', () => {
+    renderSummary();
+    renderChart();
+    renderSummaryTop();
+  });
+})();
+</script>

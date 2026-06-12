@@ -1,0 +1,119 @@
+<!-- ============================================================
+     TAB: ЗАКАЗЫ
+     ============================================================ -->
+<div id="ordersTab">
+  <div class="card">
+    <div class="section-title">Заказы</div>
+    <div class="filters">
+      <input  class="filter-input"  id="orderSearch"       placeholder="Артикул / товар / бренд..." oninput="ordersFilter()">
+      <select class="filter-select" id="orderCancelFilter" onchange="ordersFilter()">
+        <option value="">Все статусы</option>
+        <option value="false">Активные</option>
+        <option value="true">Отменённые</option>
+      </select>
+      <select class="filter-select" id="orderDaysFilter" onchange="ordersLoad()">
+        <option value="40">40 дней</option>
+        <option value="30">30 дней</option>
+        <option value="14">14 дней</option>
+        <option value="7">7 дней</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="ordersSort('date')">ДАТА ↕</th>
+          <th onclick="ordersSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="ordersSort('nm_id')">АРТ WB ↕</th>
+          <th onclick="ordersSort('supplier_article')">АРТ ↕</th>
+          <th onclick="ordersSort('subject')">ТОВАР ↕</th>
+          <th onclick="ordersSort('brand')">БРЕНД ↕</th>
+          <th onclick="ordersSort('price_with_disc')">ЦЕНА ↕</th>
+          <th onclick="ordersSort('is_cancel')">СТАТУС ↕</th>
+          <th onclick="ordersSort('region_name')">РЕГИОН ↕</th>
+        </tr></thead>
+        <tbody id="ordersBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="ordersPagination"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let data = [], filtered = [], page = 1;
+  const PER = 50;
+  let sortCol = 'date', sortDir = -1;
+
+  async function ordersLoad() {
+    document.getElementById('ordersBody').innerHTML = '';
+    const days = document.getElementById('orderDaysFilter')?.value || WB.period;
+    try {
+      const res = await fetch(`/api/dashboard/orders-raw?days_back=${days}`);
+      data = await res.json();
+      populateGlobalCabSelects(data);
+    } catch(e) { data = []; }
+    ordersFilter();
+  }
+  window.ordersLoad = ordersLoad;
+
+  function ordersFilter() {
+    const search = (document.getElementById('orderSearch')?.value || '').toLowerCase();
+    const cancel = document.getElementById('orderCancelFilter')?.value || '';
+
+    filtered = data.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (search && !`${r.supplier_article||''} ${r.subject||''} ${r.brand||''} ${r.nm_id||''}`.toLowerCase().includes(search)) return false;
+      if (cancel !== '' && String(r.is_cancel) !== cancel) return false;
+      return true;
+    });
+    sortData();
+  }
+  window.ordersFilter = ordersFilter;
+
+  function ordersSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+    sortData();
+  }
+  window.ordersSort = ordersSort;
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) va = ''; if (vb == null) vb = '';
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    page = 1;
+    render();
+  }
+
+  function render() {
+    const body = document.getElementById('ordersBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:30px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Нет данных</td></tr>`;
+      document.getElementById('ordersPagination').innerHTML = '';
+      return;
+    }
+
+    body.innerHTML = slice.map(r => `<tr class="fade-in">
+      <td class="td-mono">${fmtDate(r.date)}</td>
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td class="td-mono">${r.nm_id || '—'}</td>
+      <td>${r.supplier_article || '—'}</td>
+      <td>${r.subject || '—'}</td>
+      <td>${r.brand || '—'}</td>
+      <td class="td-mono">${fmtMoney(r.price_with_disc)}</td>
+      <td><span class="badge ${r.is_cancel ? 'badge-red' : 'badge-green'}">${r.is_cancel ? 'ОТМЕНА' : 'АКТИВЕН'}</span></td>
+      <td style="color:var(--text2)">${r.region_name || '—'}</td>
+    </tr>`).join('');
+
+    renderPagination('ordersPagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  window.addEventListener('wb:tab-activated:orders', ordersLoad);
+  window.addEventListener('wb:cabinet-changed', () => { if (data.length) ordersFilter(); });
+})();
+</script>
