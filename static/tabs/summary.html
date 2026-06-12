@@ -115,6 +115,10 @@
     grid.innerHTML = html;
   }
 
+  function getCSSVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
   function renderChart() {
     const filtered = WB.cabinet
       ? chartData.filter(r => r.cabinet_id === WB.cabinet)
@@ -137,6 +141,14 @@
     const ctx = document.getElementById('salesChart');
     if (!ctx) return;
     if (chartInstance) chartInstance.destroy();
+
+    const c = {
+      bg3:    getCSSVar('--bg3'),
+      border: getCSSVar('--border'),
+      text:   getCSSVar('--text'),
+      text2:  getCSSVar('--text2'),
+      text3:  getCSSVar('--text3'),
+    };
 
     chartInstance = new Chart(ctx.getContext('2d'), {
       type: 'bar',
@@ -172,13 +184,13 @@
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { labels: { color: 'var(--text2)', font: { family: 'IBM Plex Mono', size: 11 } } },
+          legend: { labels: { color: c.text2, font: { family: 'IBM Plex Mono', size: 11 } } },
           tooltip: {
-            backgroundColor: 'var(--bg3)',
-            borderColor: 'var(--border)',
+            backgroundColor: c.bg3,
+            borderColor: c.border,
             borderWidth: 1,
-            titleColor: 'var(--text)',
-            bodyColor: 'var(--text2)',
+            titleColor: c.text,
+            bodyColor: c.text2,
             callbacks: {
               label: ctx => ctx.dataset.label === 'Выручка ₽'
                 ? ` ${fmt(ctx.raw)} ₽`
@@ -189,11 +201,11 @@
         scales: {
           x: {
             grid: { color: 'rgba(42,42,58,0.5)' },
-            ticks: { color: '#55556a', font: { family: 'IBM Plex Mono', size: 10 }, maxRotation: 45 }
+            ticks: { color: c.text3, font: { family: 'IBM Plex Mono', size: 10 }, maxRotation: 45 }
           },
           y: {
             grid: { color: 'rgba(42,42,58,0.4)' },
-            ticks: { color: '#8888aa', font: { family: 'IBM Plex Mono', size: 10 }, callback: v => fmt(v) }
+            ticks: { color: c.text2, font: { family: 'IBM Plex Mono', size: 10 }, callback: v => fmt(v) }
           },
           y2: {
             position: 'right',

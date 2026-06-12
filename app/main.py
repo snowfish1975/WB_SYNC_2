@@ -14,10 +14,13 @@ from sqlalchemy import func, case
 from datetime import datetime, timedelta
 
 from app.database import engine, get_db
-from app.schemas import ProductCharacteristicOut, SyncLogOut, TokenRequest, StockOut, OrderOut, PriceOut, SalesReportRowOut, SaleOut
+from app.schemas import (
+    ProductCharacteristicOut, SyncLogOut, TokenRequest, StockOut, OrderOut, PriceOut, SalesReportRowOut, SaleOut,
+    UserCreate, UserUpdate, UserOut, ApiKeyCreate, ApiKeyOut, WbTokenCreate, WbTokenUpdate, WbTokenOut,
+)
 from app.crud import (
     get_characteristics, get_sync_logs, get_stocks, get_orders,
-    load_tokens_mapping, get_prices, get_sales_report, get_sales,
+    get_prices, get_sales_report, get_sales,
     create_user, get_user_by_id, get_user_by_username, list_users, update_user, delete_user,
     create_api_key, get_api_key_by_hash, list_api_keys, update_api_key_last_used, delete_api_key,
     create_wb_token, get_wb_token_by_hash, list_wb_tokens, update_wb_token, delete_wb_token,
@@ -88,7 +91,7 @@ def root():
 @app.post("/api/products", response_model=list[ProductCharacteristicOut])
 def list_products(body: TokenRequest, nm_id: int | None = Query(None), db: Session = Depends(get_db)):
     cid = token_id(body.token)
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
     data = get_characteristics(db, cabinet_id=cid, nm_id=nm_id)
     return [
         {
@@ -102,7 +105,7 @@ def list_products(body: TokenRequest, nm_id: int | None = Query(None), db: Sessi
 @app.post("/api/stocks", response_model=list[StockOut])
 def list_stocks(body: TokenRequest, nm_id: int | None = Query(None), db: Session = Depends(get_db)):
     cid = token_id(body.token)
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
     data = get_stocks(db, cabinet_id=cid, nm_id=nm_id)
     return [
         {
@@ -123,7 +126,7 @@ def list_orders(
     db: Session = Depends(get_db),
 ):
     cid = token_id(body.token)
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
     data = get_orders(db, cabinet_id=cid, days_back=days_back, limit=limit, offset=offset, fields=fields)
 
     requested_fields = [f.strip() for f in fields.split(",")] if fields else None
@@ -153,7 +156,7 @@ def list_sales(
 ):
     """Продажи и возвраты за последние N дней."""
     cid = token_id(body.token)
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
     data = get_sales(db, cabinet_id=cid, days_back=days_back, limit=limit, offset=offset, fields=fields)
 
     requested_fields = [f.strip() for f in fields.split(",")] if fields else None
@@ -178,7 +181,7 @@ def list_prices(
     db: Session = Depends(get_db),
 ):
     cid = token_id(body.token)
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
     data = get_prices(db, cabinet_id=cid, nm_id=nm_id)
     return [
         {
@@ -201,7 +204,7 @@ def list_sales_report(
     """Отчёт о продажах по реализации."""
     from datetime import datetime
     cid = token_id(body.token)
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
     dt_from = datetime.strptime(date_from, "%Y-%m-%d") if date_from else None
     dt_to = datetime.strptime(date_to, "%Y-%m-%d") if date_to else None
     data = get_sales_report(db, cabinet_id=cid, nm_id=nm_id, date_from=dt_from, date_to=dt_to, limit=limit)
@@ -216,7 +219,7 @@ def list_sales_report(
 
 @app.get("/api/logs", response_model=list[SyncLogOut])
 def list_logs(db: Session = Depends(get_db)):
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
     data = get_sync_logs(db)
     return [
         {
@@ -250,7 +253,7 @@ def health():
 @app.get("/api/dashboard/summary")
 def dashboard_summary(days_back: int = Query(40, ge=1, le=90), db: Session = Depends(get_db)):
     """Сводные цифры: заказы, выручка, возвраты, отмены."""
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
     rows = (
@@ -280,7 +283,7 @@ def dashboard_summary(days_back: int = Query(40, ge=1, le=90), db: Session = Dep
 @app.get("/api/dashboard/sales-chart")
 def dashboard_sales_chart(days_back: int = Query(40, ge=1, le=90), db: Session = Depends(get_db)):
     """Продажи по дням для графика."""
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
     rows = (
@@ -311,7 +314,7 @@ def dashboard_sales_chart(days_back: int = Query(40, ge=1, le=90), db: Session =
 @app.get("/api/dashboard/top-products")
 def dashboard_top_products(days_back: int = Query(40, ge=1, le=90), limit: int = Query(20, le=100), db: Session = Depends(get_db)):
     """Топ товаров по выручке."""
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
     rows = (
@@ -349,7 +352,7 @@ def dashboard_top_products(days_back: int = Query(40, ge=1, le=90), limit: int =
 @app.get("/api/dashboard/stocks-summary")
 def dashboard_stocks_summary(db: Session = Depends(get_db)):
     """Остатки сгруппированные по товару."""
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
 
     rows = (
         db.query(
@@ -380,7 +383,7 @@ def dashboard_stocks_summary(db: Session = Depends(get_db)):
 @app.get("/api/dashboard/sales-report-summary")
 def dashboard_sales_report_summary(db: Session = Depends(get_db)):
     """Сводка по отчёту реализации: комиссии WB, к перечислению."""
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
 
     rows = (
         db.query(
@@ -425,7 +428,7 @@ def dashboard_orders_raw(
     db: Session = Depends(get_db)
 ):
     """Сырые заказы для таблицы дашборда."""
-    mapping = load_tokens_mapping()
+    mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
     rows = (
