@@ -13,7 +13,7 @@
 - Автоматическая ежедневная синхронизация по расписанию
 - Ручной запуск синхронизации через API
 - Telegram-уведомления о результатах синхронизации
-- Встроенный дашборд с 11 вкладками аналитики
+- Встроенный дашборд с 12 вкладками аналитики
 - Raw data API для внешних потребителей
 
 ---
@@ -33,6 +33,11 @@
 - **Витрина продаж** — просмотры, добавления в корзину, конверсия по товарам
 - **Остатки по складам** — остатки и оборачиваемость по регионам и складам
 - **Оценки товаров** — рейтинг, отзывы по звёздам, перцентиль
+
+### Реклама (advert-api)
+- **Кампании** — список, статусы, типы ставок
+- **Статистика** — просмотры, клики, CTR, CPC, CR, заказы, затраты
+- **Затраты** — история списаний по дням с указанием кампании
 
 ---
 
@@ -67,6 +72,7 @@ static/
 │   ├── conversion.html    — Воронка конверсии
 │   ├── stock-offices.html — Остатки по складам
 │   ├── item-ratings.html  — Оценки и отзывы
+│   ├── advert.html         — Реклама
 │   ├── characteristics.html — Характеристики
 │   └── abc-xyz.html       — ABC/XYZ анализ
 ├── js/
@@ -173,6 +179,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `/api/dashboard/funnel` | Воронка конверсии (сравнение периодов) |
 | `/api/dashboard/stock-offices` | Остатки по складам/регионам |
 | `/api/dashboard/item-ratings` | Оценки и отзывы товаров |
+| `/api/dashboard/ad-campaigns` | Рекламные кампании |
+| `/api/dashboard/ad-stats` | Статистика рекламы (CTR, CPC, CR, ROI) |
+| `/api/dashboard/ad-expenses` | История затрат на рекламу |
 | `/api/dashboard/abc-xyz` | ABC/XYZ анализ |
 | `/api/dashboard/characteristics` | Характеристики товаров |
 | `/api/dashboard/cabinets` | Список кабинетов |
@@ -241,3 +250,4 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Analytics API v2 | `seller-analytics-api.wildberries.ru` | Остатки по группам/складам |
 | Statistics API | `statistics-api.wildberries.ru` | Заказы, продажи |
 | Prices API | `discounts-prices-api.wildberries.ru` | Цены и скидки |
+| Advert API | `advert-api.wildberries.ru` | Рекламные кампании, статистика, затраты |
