@@ -148,3 +148,81 @@ async def fetch_item_rating(token: str, date_from: str, date_to: str, limit: int
             await asyncio.sleep(20)
     logger.info(f"Item rating: total {len(results)} products, seller_rating={seller_rating}")
     return results, seller_rating
+
+
+ADVERT_API_BASE = "https://advert-api.wildberries.ru"
+
+
+async def fetch_ad_campaigns(token: str) -> list[dict]:
+    """GET /adv/v1/promotion/count — list all campaign IDs with type+status"""
+    headers = {"Authorization": token}
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(f"{ADVERT_API_BASE}/adv/v1/promotion/count", headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        campaigns = []
+        for group in (data.get("adverts") or []):
+            for ad in group.get("advert_list", []):
+                campaigns.append({
+                    "advertId": ad["advertId"],
+                    "type": group["type"],
+                    "status": group["status"],
+                    "changeTime": ad.get("changeTime"),
+                })
+        logger.info(f"Ad campaigns: {len(campaigns)} total")
+        return campaigns
+
+
+async def fetch_ad_campaign_details(token: str, advert_ids: list[int]) -> list[dict]:
+    """GET /api/advert/v2/adverts — detailed info for up to 50 campaigns"""
+    headers = {"Authorization": token}
+    ids_str = ",".join(str(i) for i in advert_ids[:50])
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{ADVERT_API_BASE}/api/advert/v2/adverts",
+            headers=headers, params={"ids": ids_str},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        adverts = data.get("adverts", [])
+        logger.info(f"Ad campaign details: {len(adverts)} campaigns")
+        return adverts
+
+
+async def fetch_ad_stats(token: str, advert_ids: list[int], date_from: str, date_to: str) -> list[dict]:
+    """GET /adv/v3/fullstats — stats for campaigns (max 50 IDs, max 31 days)"""
+    headers = {"Authorization": token}
+    ids_str = ",".join(str(i) for i in advert_ids[:50])
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.get(
+            f"{ADVERT_API_BASE}/adv/v3/fullstats",
+            headers=headers,
+            params={"ids": ids_str, "beginDate": date_from, "endDate": date_to},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        logger.info(f"Ad stats: {len(data)} campaigns")
+        return data
+
+
+async def fetch_ad_expenses(token: str, date_from: str, date_to: str) -> list[dict]:
+    """GET /adv/v1/upd — expense history for period (max 31 days)"""
+    headers = {"Authorization": token}
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{ADVERT_API_BASE}/adv/v1/upd",
+            headers=headers, params={"from": date_from, "to": date_to},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        logger.info(f"Ad expenses: {len(data)} records")
+        return data
+
+
+async def fetch_ad_balance(token: str) -> dict:
+    """GET /adv/v1/balance"""
+    headers = {"Authorization": token}
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(f"{ADVERT_API_BASE}/adv/v1/balance", headers=headers)
+        resp.raise_for_status()
+        return resp.json()

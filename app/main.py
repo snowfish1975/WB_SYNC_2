@@ -26,10 +26,11 @@ from app.crud import (
     create_wb_token, get_wb_token_by_hash, list_wb_tokens, update_wb_token, delete_wb_token,
     load_token_mapping,
     get_shelf_metrics, get_funnel_metrics, get_stock_by_offices, get_item_ratings,
+    get_ad_campaigns, get_ad_stats, get_ad_expenses,
 )
 from app.models import User, ApiKey, WbToken
 from app.models import ProductCharacteristic, Stock, Order, Price, SalesReport, Sale
-from app.models import ShelfMetric, FunnelMetric, StockByOffice, ItemRating
+from app.models import ShelfMetric, FunnelMetric, StockByOffice, ItemRating, AdCampaign, AdCampaignStats, AdExpense
 from app.scheduler import run_sync_all, run_sales_report_sync
 
 from fastapi.responses import JSONResponse
@@ -929,5 +930,107 @@ def dashboard_funnel(
             "dynamic_buyout": r.dynamic_buyout,
             "period_start": r.period_start.isoformat() if r.period_start else None,
             "period_end": r.period_end.isoformat() if r.period_end else None,
+        })
+    return result
+
+
+@app.get("/api/dashboard/ad-campaigns")
+def dashboard_ad_campaigns(
+    db: Session = Depends(get_db),
+):
+    """Рекламные кампании: список, статусы, типы."""
+    mapping = load_token_mapping()
+
+    rows = db.query(AdCampaign).order_by(AdCampaign.status.desc(), AdCampaign.advert_id.desc()).limit(50000).all()
+
+    STATUS_MAP = {-1: "Удалена", 4: "Готова", 7: "Завершена", 8: "Отменена", 9: "Активна", 11: "На паузе"}
+    TYPE_MAP = {6: "Аукцион", 8: "Единая ставка (устар.)", 9: "Единая/ручная"}
+
+    result = []
+    for r in rows:
+        result.append({
+            "cabinet_id": r.cabinet_id,
+            "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8]),
+            "advert_id": r.advert_id,
+            "name": r.name or "",
+            "advert_type": r.advert_type,
+            "type_name": TYPE_MAP.get(r.advert_type, f"Тип {r.advert_type}"),
+            "status": r.status,
+            "status_name": STATUS_MAP.get(r.status, f"Статус {r.status}"),
+            "bid_type": r.bid_type or "",
+            "payment_type": r.payment_type or "",
+            "change_time": r.change_time.isoformat() if r.change_time else None,
+        })
+    return result
+
+
+@app.get("/api/dashboard/ad-stats")
+def dashboard_ad_stats(
+    days_back: int = Query(30, ge=1, le=31),
+    db: Session = Depends(get_db),
+):
+    """Статистика рекламных кампаний: просмотры, клики, CTR, CPC, CR, заказы, затраты."""
+    mapping = load_token_mapping()
+    threshold = datetime.now().date() - timedelta(days=days_back)
+
+    rows = (
+        db.query(AdCampaignStats)
+        .filter(AdCampaignStats.date >= datetime.combine(threshold, datetime.min.time()))
+        .order_by(AdCampaignStats.spend.desc())
+        .limit(100000)
+        .all()
+    )
+
+    result = []
+    for r in rows:
+        result.append({
+            "cabinet_id": r.cabinet_id,
+            "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8]),
+            "advert_id": r.advert_id,
+            "date": r.date.strftime("%Y-%m-%d") if r.date else None,
+            "views": r.views,
+            "clicks": r.clicks,
+            "ctr": round(r.ctr, 2),
+            "cpc": round(r.cpc, 2),
+            "cr": round(r.cr, 2),
+            "atbs": r.atbs,
+            "orders": r.orders,
+            "shks": r.shks,
+            "canceled": r.canceled,
+            "spend": round(r.spend, 2),
+            "sum_price": round(r.sum_price, 2),
+        })
+    return result
+
+
+@app.get("/api/dashboard/ad-expenses")
+def dashboard_ad_expenses(
+    days_back: int = Query(30, ge=1, le=31),
+    db: Session = Depends(get_db),
+):
+    """История затрат на рекламу."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+
+    rows = (
+        db.query(AdExpense)
+        .filter(AdExpense.upd_time >= threshold)
+        .order_by(AdExpense.upd_time.desc())
+        .limit(50000)
+        .all()
+    )
+
+    result = []
+    for r in rows:
+        result.append({
+            "cabinet_id": r.cabinet_id,
+            "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8]),
+            "advert_id": r.advert_id,
+            "camp_name": r.camp_name or "",
+            "advert_type": r.advert_type,
+            "advert_status": r.advert_status,
+            "payment_type": r.payment_type or "",
+            "upd_time": r.upd_time.isoformat() if r.upd_time else None,
+            "upd_sum": r.upd_sum,
         })
     return result

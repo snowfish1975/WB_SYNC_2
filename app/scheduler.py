@@ -15,7 +15,7 @@ from app.wb_client import (
     fetch_sales_report,
     fetch_sales_stream,
 )
-from app.wb_analytics_client import fetch_sales_funnel, fetch_stock_by_offices, fetch_item_rating
+from app.wb_analytics_client import fetch_sales_funnel, fetch_stock_by_offices, fetch_item_rating, fetch_ad_campaigns, fetch_ad_campaign_details, fetch_ad_stats, fetch_ad_expenses
 from app.crud import (
     upsert_characteristic, upsert_stock, log_sync, upsert_price,
     upsert_sales_report_row, upsert_orders_bulk, upsert_sales_bulk,
@@ -25,6 +25,9 @@ from app.crud import (
     clear_funnel_metrics, upsert_funnel_metric,
     clear_stock_by_offices, upsert_stock_by_office,
     clear_item_ratings, upsert_item_rating,
+    clear_ad_campaigns, upsert_ad_campaign, upsert_ad_campaign_detail,
+    clear_ad_stats, upsert_ad_stats,
+    clear_ad_expenses, upsert_ad_expense,
 )
 from app.database import SessionLocal
 
@@ -129,6 +132,9 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
         "funnel_count": 0,
         "offices_count": 0,
         "ratings_count": 0,
+        "ad_campaigns": 0,
+        "ad_stats_camps": 0,
+        "ad_expenses": 0,
         "orders_error": None,
         "error": None,
     }
@@ -274,12 +280,70 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
             gc.collect()
             logger.info(f"[{name}] Оценки товаров: {ratings_count} товаров, рейтинг продавца: {seller_rating}")
 
+            # --- Рекламные кампании ---
+            logger.info(f"[{name}] загрузка рекламных кампаний...")
+            try:
+                ad_campaigns = await fetch_ad_campaigns(token)
+                clear_ad_campaigns(db, tid)
+                for camp in ad_campaigns:
+                    upsert_ad_campaign(db, tid, camp["advertId"], camp["type"], camp["status"], camp.get("changeTime"))
+                db.commit()
+                logger.info(f"[{name}] Рекламные кампании: {len(ad_campaigns)}")
+
+                # Статистика по активным кампаниям (max 50 за раз)
+                active_ids = [c["advertId"] for c in ad_campaigns if c["status"] in (9, 7, 11)][:50]
+                if active_ids:
+                    # Загружаем детали кампаний (названия и т.д.)
+                    for i in range(0, len(active_ids), 50):
+                        batch = active_ids[i:i+50]
+                        details = await fetch_ad_campaign_details(token, batch)
+                        for advert in details:
+                            upsert_ad_campaign_detail(db, tid, advert)
+                    db.commit()
+
+                    clear_ad_stats(db, tid)
+                    for i in range(0, len(active_ids), 50):
+                        batch = active_ids[i:i+50]
+                        stats_data = await fetch_ad_stats(token, batch, date_from, date_to)
+                        for camp_stats in stats_data:
+                            aid = camp_stats.get("advertId", 0)
+                            upsert_ad_stats(db, tid, aid, period_start, {
+                                "views": camp_stats.get("views", 0),
+                                "clicks": camp_stats.get("clicks", 0),
+                                "ctr": camp_stats.get("ctr", 0),
+                                "cpc": camp_stats.get("cpc", 0),
+                                "cr": camp_stats.get("cr", 0),
+                                "atbs": camp_stats.get("atbs", 0),
+                                "orders": camp_stats.get("orders", 0),
+                                "shks": camp_stats.get("shks", 0),
+                                "canceled": camp_stats.get("canceled", 0),
+                                "sum": camp_stats.get("sum", 0),
+                                "sum_price": camp_stats.get("sum_price", 0),
+                            }, camp_stats)
+                        db.commit()
+                    logger.info(f"[{name}] Статистика рекламы: {len(active_ids)} кампаний")
+
+                # Затраты
+                expenses = await fetch_ad_expenses(token, date_from, date_to)
+                clear_ad_expenses(db, tid)
+                for exp in expenses:
+                    upsert_ad_expense(db, tid, exp)
+                db.commit()
+                result["ad_campaigns"] = len(ad_campaigns)
+                result["ad_stats_camps"] = len(active_ids) if active_ids else 0
+                result["ad_expenses"] = len(expenses)
+                del ad_campaigns
+                gc.collect()
+                logger.info(f"[{name}] Реклама: кампании={result.get('ad_campaigns', 0)}, статистика={result.get('ad_stats_camps', 0)}, затраты={result.get('ad_expenses', 0)}")
+            except Exception as e:
+                logger.error(f"[{name}] ошибка рекламы: {e}")
+
         except Exception as e:
             db.rollback()
             logger.error(f"[{name}] ошибка аналитики: {e}")
             result["analytics_error"] = str(e)[:200]
 
-        log_sync(db, tid, "ok", records=chars_count + stocks_count + orders_count + prices_count + sales_count + result.get("shelf_count", 0) + result.get("funnel_count", 0) + result.get("offices_count", 0) + result.get("ratings_count", 0))
+        log_sync(db, tid, "ok", records=chars_count + stocks_count + orders_count + prices_count + sales_count + result.get("shelf_count", 0) + result.get("funnel_count", 0) + result.get("offices_count", 0) + result.get("ratings_count", 0) + result.get("ad_expenses", 0))
         db.commit()
 
     except Exception as e:

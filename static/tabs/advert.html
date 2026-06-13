@@ -1,0 +1,296 @@
+<!-- ============================================================
+     TAB: РЕКЛАМА
+     ============================================================ -->
+<div id="adTab">
+  <div class="summary-grid section-mb" id="adMetrics"></div>
+
+  <div class="two-col section-mb">
+    <div class="card">
+      <div class="section-title">Статистика по дням</div>
+      <canvas id="adChartCanvas" height="200"></canvas>
+    </div>
+    <div class="card">
+      <div class="section-title">Затраты по кампаниям</div>
+      <div id="adExpensesSummary" style="padding:10px 0;"></div>
+    </div>
+  </div>
+
+  <div class="card section-mb">
+    <div class="section-title">Статистика кампаний по дням</div>
+    <div class="filters">
+      <input class="filter-input" id="adStatsSearch" placeholder="ID кампании / кабинет..." oninput="adStatsFilter()">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="adStatsSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="adStatsSort('advert_id')">ID КАМПАНИИ ↕</th>
+          <th onclick="adStatsSort('date')">ДАТА ↕</th>
+          <th onclick="adStatsSort('views')">ПОКАЗЫ ↕</th>
+          <th onclick="adStatsSort('clicks')">КЛИКИ ↕</th>
+          <th onclick="adStatsSort('ctr')">CTR % ↕</th>
+          <th onclick="adStatsSort('cpc')">CPC ₽ ↕</th>
+          <th onclick="adStatsSort('cr')">CR % ↕</th>
+          <th onclick="adStatsSort('orders')">ЗАКАЗЫ ↕</th>
+          <th onclick="adStatsSort('sum_price')">СУММА ₽ ↕</th>
+          <th onclick="adStatsSort('spend')">ЗАТРАТЫ ₽ ↕</th>
+        </tr></thead>
+        <tbody id="adStatsBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="adStatsPagination"></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Затраты по дням</div>
+    <div class="filters">
+      <input class="filter-input" id="adExpSearch" placeholder="Кампания / кабинет..." oninput="adExpFilter()">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="adExpSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="adExpSort('camp_name')">КАМПАНИЯ ↕</th>
+          <th onclick="adExpSort('advert_id')">ID ↕</th>
+          <th onclick="adExpSort('upd_time')">ДАТА ↕</th>
+          <th onclick="adExpSort('upd_sum')">СУММА ₽ ↕</th>
+          <th onclick="adExpSort('payment_type')">ИСТОЧНИК ↕</th>
+        </tr></thead>
+        <tbody id="adExpBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="adExpPagination"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let statsData = [], statsFiltered = [], statsPage = 1;
+  let expData = [], expFiltered = [], expPage = 1;
+  const PER = 50;
+  let statsSortCol = 'spend', statsSortDir = -1;
+  let expSortCol = 'upd_sum', expSortDir = -1;
+
+  async function adLoad() {
+    document.getElementById('adStatsBody').innerHTML = '';
+    document.getElementById('adExpBody').innerHTML = '';
+    try {
+      const [statsRes, expRes] = await Promise.all([
+        fetch(`/api/dashboard/ad-stats?days_back=${WB.period}`),
+        fetch(`/api/dashboard/ad-expenses?days_back=${WB.period}`),
+      ]);
+      statsData = await statsRes.json();
+      expData = await expRes.json();
+    } catch(e) { statsData = []; expData = []; }
+    adStatsFilter();
+    adExpFilter();
+    renderMetrics();
+    renderChart();
+    renderExpensesSummary();
+  }
+  window.adLoad = adLoad;
+
+  function adStatsFilter() {
+    const search = (document.getElementById('adStatsSearch')?.value || '').toLowerCase();
+    statsFiltered = statsData.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (search && !`${r.advert_id}`.includes(search) && !`${r.seller_name}`.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortStats();
+  }
+  window.adStatsFilter = adStatsFilter;
+
+  function adStatsSort(col) {
+    if (statsSortCol === col) statsSortDir *= -1; else { statsSortCol = col; statsSortDir = -1; }
+    sortStats();
+  }
+  window.adStatsSort = adStatsSort;
+
+  function sortStats() {
+    statsFiltered.sort((a, b) => {
+      let va = a[statsSortCol], vb = b[statsSortCol];
+      if (va == null) va = 0; if (vb == null) vb = 0;
+      if (typeof va === 'string') return va.localeCompare(vb) * statsSortDir;
+      return (va - vb) * statsSortDir;
+    });
+    statsPage = 1;
+    renderStatsTable();
+  }
+
+  function adExpFilter() {
+    const search = (document.getElementById('adExpSearch')?.value || '').toLowerCase();
+    expFiltered = expData.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (search && !`${r.camp_name||''} ${r.seller_name||''} ${r.advert_id}`.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortExp();
+  }
+  window.adExpFilter = adExpFilter;
+
+  function adExpSort(col) {
+    if (expSortCol === col) expSortDir *= -1; else { expSortCol = col; expSortDir = -1; }
+    sortExp();
+  }
+  window.adExpSort = adExpSort;
+
+  function sortExp() {
+    expFiltered.sort((a, b) => {
+      let va = a[expSortCol], vb = b[expSortCol];
+      if (va == null) va = 0; if (vb == null) vb = 0;
+      if (typeof va === 'string') return va.localeCompare(vb) * expSortDir;
+      return (va - vb) * expSortDir;
+    });
+    expPage = 1;
+    renderExpTable();
+  }
+
+  function renderMetrics() {
+    const m = document.getElementById('adMetrics');
+    if (!m) return;
+    const d = WB.cabinet ? statsData.filter(r => r.cabinet_id === WB.cabinet) : statsData;
+    const e = WB.cabinet ? expData.filter(r => r.cabinet_id === WB.cabinet) : expData;
+
+    let totalViews=0, totalClicks=0, totalOrders=0, totalSpend=0, totalSumPrice=0;
+    for (const r of d) {
+      totalViews += r.views || 0;
+      totalClicks += r.clicks || 0;
+      totalOrders += r.orders || 0;
+      totalSpend += r.spend || 0;
+      totalSumPrice += r.sum_price || 0;
+    }
+    let totalExpenses = 0;
+    for (const r of e) {
+      totalExpenses += r.upd_sum || 0;
+    }
+    const avgCTR = totalViews > 0 ? (totalClicks / totalViews * 100).toFixed(2) : 0;
+    const avgCPC = totalClicks > 0 ? (totalSpend / totalClicks).toFixed(2) : 0;
+    const avgCR = totalClicks > 0 ? (totalOrders / totalClicks * 100).toFixed(2) : 0;
+    const cpa = totalOrders > 0 ? Math.round(totalSpend / totalOrders) : 0;
+    const roi = totalSpend > 0 ? ((totalSumPrice - totalSpend) / totalSpend * 100).toFixed(0) : 0;
+    const uniqueCamps = new Set(d.map(r => r.advert_id)).size;
+
+    m.innerHTML = `
+      <div class="card metric-card teal"><div class="metric-label">КАМПАНИИ</div><div class="metric-value">${uniqueCamps}</div><div class="metric-sub">${d.length} записей</div></div>
+      <div class="card metric-card orange"><div class="metric-label">ПОКАЗЫ</div><div class="metric-value">${fmt(totalViews)}</div></div>
+      <div class="card metric-card"><div class="metric-label">КЛИКИ</div><div class="metric-value">${fmt(totalClicks)}</div><div class="metric-sub">CTR ${avgCTR}%</div></div>
+      <div class="card metric-card green"><div class="metric-label">ЗАКАЗЫ</div><div class="metric-value">${fmt(totalOrders)}</div><div class="metric-sub">CR ${avgCR}%</div></div>
+      <div class="card metric-card yellow"><div class="metric-label">ЗАТРАТЫ</div><div class="metric-value">${fmtMoney(Math.round(totalExpenses))}</div><div class="metric-sub">CPA ${fmtMoney(cpa)}</div></div>
+      <div class="card metric-card"><div class="metric-label">ROI</div><div class="metric-value" style="color:${roi >= 0 ? 'var(--green)' : 'var(--red)'}">${roi}%</div><div class="metric-sub">выручка ${fmtMoney(Math.round(totalSumPrice))}</div></div>
+    `;
+  }
+
+  function renderChart() {
+    const d = WB.cabinet ? statsData.filter(r => r.cabinet_id === WB.cabinet) : statsData;
+    const byDate = {};
+    for (const r of d) {
+      if (!r.date) continue;
+      if (!byDate[r.date]) byDate[r.date] = { views: 0, clicks: 0, orders: 0, spend: 0, sum_price: 0 };
+      byDate[r.date].views += r.views || 0;
+      byDate[r.date].clicks += r.clicks || 0;
+      byDate[r.date].orders += r.orders || 0;
+      byDate[r.date].spend += r.spend || 0;
+      byDate[r.date].sum_price += r.sum_price || 0;
+    }
+    const dates = Object.keys(byDate).sort();
+    if (!dates.length) return;
+    const ctx = document.getElementById('adChartCanvas');
+    if (!ctx) return;
+    if (ctx._chart) ctx._chart.destroy();
+    ctx._chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: dates.map(d => d.slice(5)),
+        datasets: [
+          { label: 'Затраты ₽', data: dates.map(d => byDate[d].spend), backgroundColor: 'rgba(255,165,0,0.7)', order: 2 },
+          { label: 'Сумма заказов ₽', data: dates.map(d => byDate[d].sum_price), backgroundColor: 'rgba(0,200,120,0.7)', order: 1 },
+          { label: 'Заказы', data: dates.map(d => byDate[d].orders), type: 'line', borderColor: 'var(--accent3)', backgroundColor: 'transparent', yAxisID: 'y1', tension: 0.3, order: 0 },
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: 'var(--text2)', font: { family: 'IBM Plex Mono', size: 11 } } } },
+        scales: {
+          x: { ticks: { color: 'var(--text3)', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: 'var(--border)' } },
+          y: { ticks: { color: 'var(--text3)', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: 'var(--border)' } },
+          y1: { position: 'right', ticks: { color: 'var(--accent3)', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { display: false } },
+        }
+      }
+    });
+  }
+
+  function renderExpensesSummary() {
+    const el = document.getElementById('adExpensesSummary');
+    if (!el) return;
+    const e = WB.cabinet ? expData.filter(r => r.cabinet_id === WB.cabinet) : expData;
+    const byCamp = {};
+    for (const r of e) {
+      const key = r.camp_name || `ID ${r.advert_id}`;
+      if (!byCamp[key]) byCamp[key] = 0;
+      byCamp[key] += r.upd_sum || 0;
+    }
+    const sorted = Object.entries(byCamp).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const maxVal = sorted.length ? sorted[0][1] : 1;
+    el.innerHTML = sorted.map(([name, sum]) => `
+      <div style="margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text2);">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;">${name}</span>
+          <span style="color:var(--accent);font-weight:500;">${fmtMoney(sum)}</span>
+        </div>
+        <div style="height:6px;background:var(--bg3);border-radius:3px;margin-top:3px;">
+          <div style="height:100%;width:${sum/maxVal*100}%;background:var(--accent);border-radius:3px;"></div>
+        </div>
+      </div>
+    `).join('') || '<div style="color:var(--text3);padding:20px;">Нет данных</div>';
+  }
+
+  function renderStatsTable() {
+    const body = document.getElementById('adStatsBody');
+    if (!body) return;
+    const slice = statsFiltered.slice((statsPage-1)*PER, statsPage*PER);
+    if (!statsFiltered.length) {
+      body.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:30px;">Нет данных</td></tr>`;
+      document.getElementById('adStatsPagination').innerHTML = '';
+      return;
+    }
+    body.innerHTML = slice.map(r => `<tr class="fade-in">
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td class="td-mono">${r.advert_id}</td>
+      <td class="td-mono">${r.date || '—'}</td>
+      <td class="td-mono">${fmt(r.views)}</td>
+      <td class="td-mono">${fmt(r.clicks)}</td>
+      <td class="td-mono" style="color:var(--accent2)">${r.ctr}%</td>
+      <td class="td-mono">${r.cpc}</td>
+      <td class="td-mono" style="color:var(--green)">${r.cr}%</td>
+      <td class="td-mono" style="color:var(--green)">${fmt(r.orders)}</td>
+      <td class="td-mono" style="color:var(--accent)">${fmtMoney(Math.round(r.sum_price))}</td>
+      <td class="td-mono" style="color:var(--red)">${fmtMoney(Math.round(r.spend))}</td>
+    </tr>`).join('');
+    renderPagination('adStatsPagination', statsFiltered.length, PER, statsPage, p => { statsPage = p; renderStatsTable(); });
+  }
+
+  function renderExpTable() {
+    const body = document.getElementById('adExpBody');
+    if (!body) return;
+    const slice = expFiltered.slice((expPage-1)*PER, expPage*PER);
+    if (!expFiltered.length) {
+      body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:30px;">Нет данных</td></tr>`;
+      document.getElementById('adExpPagination').innerHTML = '';
+      return;
+    }
+    body.innerHTML = slice.map(r => `<tr class="fade-in">
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td>${r.camp_name || '—'}</td>
+      <td class="td-mono">${r.advert_id}</td>
+      <td class="td-mono">${r.upd_time ? r.upd_time.slice(0, 10) : '—'}</td>
+      <td class="td-mono" style="color:var(--red)">${fmtMoney(r.upd_sum)}</td>
+      <td>${r.payment_type || '—'}</td>
+    </tr>`).join('');
+    renderPagination('adExpPagination', expFiltered.length, PER, expPage, p => { expPage = p; renderExpTable(); });
+  }
+
+  window.addEventListener('wb:tab-activated:ad', adLoad);
+  window.addEventListener('wb:cabinet-changed', () => { if (statsData.length) { adStatsFilter(); adExpFilter(); renderMetrics(); renderChart(); renderExpensesSummary(); } });
+})();
+</script>

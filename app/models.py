@@ -469,3 +469,63 @@ class ItemRating(Base):
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
     __table_args__ = (UniqueConstraint("cabinet_id", "nm_id", "period_start", "period_end", name="uq_item_rating"),)
+
+
+# =====================
+# ADVERTISING ANALYTICS
+# =====================
+
+
+class AdCampaign(Base):
+    __tablename__ = "ad_campaigns"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    advert_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    advert_type: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[int] = mapped_column(Integer, default=0)
+    name: Mapped[str] = mapped_column(String(300), nullable=True)
+    bid_type: Mapped[str] = mapped_column(String(50), nullable=True)
+    payment_type: Mapped[str] = mapped_column(String(50), nullable=True)
+    change_time: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+    __table_args__ = (UniqueConstraint("cabinet_id", "advert_id", name="uq_ad_campaign"),)
+
+
+class AdCampaignStats(Base):
+    __tablename__ = "ad_campaign_stats"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    advert_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    date: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    clicks: Mapped[int] = mapped_column(Integer, default=0)
+    ctr: Mapped[float] = mapped_column(Float, default=0)
+    cpc: Mapped[float] = mapped_column(Float, default=0)
+    cr: Mapped[float] = mapped_column(Float, default=0)
+    atbs: Mapped[int] = mapped_column(Integer, default=0)
+    orders: Mapped[int] = mapped_column(Integer, default=0)
+    shks: Mapped[int] = mapped_column(Integer, default=0)
+    canceled: Mapped[int] = mapped_column(Integer, default=0)
+    spend: Mapped[float] = mapped_column(Float, default=0)
+    sum_price: Mapped[float] = mapped_column(Float, default=0)
+    avg_position: Mapped[float] = mapped_column(Float, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+    __table_args__ = (UniqueConstraint("cabinet_id", "advert_id", "date", name="uq_ad_stats"),)
+
+
+class AdExpense(Base):
+    __tablename__ = "ad_expenses"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    advert_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    camp_name: Mapped[str] = mapped_column(String(300), nullable=True)
+    advert_type: Mapped[int] = mapped_column(Integer, default=0)
+    advert_status: Mapped[int] = mapped_column(Integer, default=0)
+    payment_type: Mapped[str] = mapped_column(String(50), nullable=True)
+    upd_time: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    upd_sum: Mapped[int] = mapped_column(Integer, default=0)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+    __table_args__ = (UniqueConstraint("cabinet_id", "advert_id", "upd_time", name="uq_ad_expense"),)

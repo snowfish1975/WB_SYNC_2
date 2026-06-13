@@ -14,6 +14,7 @@ const TAB_SRCS = {
   abcxyz:       '/static/tabs/abc-xyz.html',
   'stock-offices': '/static/tabs/stock-offices.html',
   'item-ratings':  '/static/tabs/item-ratings.html',
+  'ad':            '/static/tabs/advert.html',
 };
 
 const loadedTabs = new Set();

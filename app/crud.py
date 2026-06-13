@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from app.models import ProductCharacteristic, SyncLog, Stock, Order, Price, SalesReport, Sale, User, ApiKey, WbToken, ShelfMetric, FunnelMetric, StockByOffice, ItemRating
+from app.models import ProductCharacteristic, SyncLog, Stock, Order, Price, SalesReport, Sale, User, ApiKey, WbToken, ShelfMetric, FunnelMetric, StockByOffice, ItemRating, AdCampaign, AdCampaignStats, AdExpense
 from datetime import datetime, timedelta
 import os
 import hashlib
@@ -910,15 +910,104 @@ def get_item_ratings(db: Session, cabinet_id: str | None = None):
         q = q.filter(ItemRating.cabinet_id == cabinet_id)
     return q.order_by(ItemRating.feedback_count.desc()).limit(50000).all()
 
-    # Fallback: загрузка из env var (для обратной совместимости)
-    raw = os.getenv("WB_TOKENS_JSON", "{}")
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        data = {}
 
-    for name, token in data.items():
-        tid = hashlib.sha256(token.encode()).hexdigest()[:32]
-        mapping[tid] = name
+# -------------------------
+# Ad Campaigns (Рекламные кампании)
+# -------------------------
+def clear_ad_campaigns(db: Session, cabinet_id: str):
+    db.query(AdCampaign).filter(AdCampaign.cabinet_id == cabinet_id).delete()
+    db.commit()
 
-    return mapping
+def upsert_ad_campaign(db: Session, cabinet_id: str, advert_id: int, advert_type: int, status: int, change_time=None, raw_data=None):
+    stmt = pg_insert(AdCampaign).values(
+        cabinet_id=cabinet_id, advert_id=advert_id, advert_type=advert_type,
+        status=status, change_time=change_time, raw_data=raw_data or {},
+    ).on_conflict_do_update(
+        constraint="uq_ad_campaign",
+        set_={"status": pg_insert(AdCampaign).excluded.status, "change_time": pg_insert(AdCampaign).excluded.change_time, "raw_data": pg_insert(AdCampaign).excluded.raw_data, "synced_at": datetime.utcnow()},
+    )
+    db.execute(stmt)
+
+def upsert_ad_campaign_detail(db: Session, cabinet_id: str, advert: dict):
+    ad = advert
+    settings = ad.get("settings", {})
+    ts = ad.get("timestamps", {})
+    stmt = pg_insert(AdCampaign).values(
+        cabinet_id=cabinet_id, advert_id=ad.get("id", 0),
+        name=settings.get("name", ""), bid_type=ad.get("bid_type", ""),
+        payment_type=settings.get("payment_type", ""), status=ad.get("status", 0),
+        advert_type=0, change_time=None,
+        raw_data=advert,
+    ).on_conflict_do_update(
+        constraint="uq_ad_campaign",
+        set_={"name": pg_insert(AdCampaign).excluded.name, "bid_type": pg_insert(AdCampaign).excluded.bid_type, "payment_type": pg_insert(AdCampaign).excluded.payment_type, "status": pg_insert(AdCampaign).excluded.status, "raw_data": pg_insert(AdCampaign).excluded.raw_data, "synced_at": datetime.utcnow()},
+    )
+    db.execute(stmt)
+
+def get_ad_campaigns(db: Session, cabinet_id: str | None = None):
+    q = db.query(AdCampaign)
+    if cabinet_id:
+        q = q.filter(AdCampaign.cabinet_id == cabinet_id)
+    return q.order_by(AdCampaign.status.desc(), AdCampaign.advert_id.desc()).limit(50000).all()
+
+
+# -------------------------
+# Ad Campaign Stats (Статистика рекламных кампаний)
+# -------------------------
+def clear_ad_stats(db: Session, cabinet_id: str):
+    db.query(AdCampaignStats).filter(AdCampaignStats.cabinet_id == cabinet_id).delete()
+    db.commit()
+
+def upsert_ad_stats(db: Session, cabinet_id: str, advert_id: int, date: datetime, stats: dict, raw_data=None):
+    stmt = pg_insert(AdCampaignStats).values(
+        cabinet_id=cabinet_id, advert_id=advert_id, date=date,
+        views=stats.get("views", 0), clicks=stats.get("clicks", 0),
+        ctr=stats.get("ctr", 0) or 0, cpc=stats.get("cpc", 0) or 0,
+        cr=stats.get("cr", 0) or 0, atbs=stats.get("atbs", 0),
+        orders=stats.get("orders", 0), shks=stats.get("shks", 0),
+        canceled=stats.get("canceled", 0), spend=stats.get("sum", 0) or 0,
+        sum_price=stats.get("sum_price", 0) or 0,
+        raw_data=raw_data or stats,
+    ).on_conflict_do_update(
+        constraint="uq_ad_stats",
+        set_={"views": pg_insert(AdCampaignStats).excluded.views, "clicks": pg_insert(AdCampaignStats).excluded.clicks, "ctr": pg_insert(AdCampaignStats).excluded.ctr, "cpc": pg_insert(AdCampaignStats).excluded.cpc, "cr": pg_insert(AdCampaignStats).excluded.cr, "atbs": pg_insert(AdCampaignStats).excluded.atbs, "orders": pg_insert(AdCampaignStats).excluded.orders, "shks": pg_insert(AdCampaignStats).excluded.shks, "spend": pg_insert(AdCampaignStats).excluded.spend, "sum_price": pg_insert(AdCampaignStats).excluded.sum_price, "raw_data": pg_insert(AdCampaignStats).excluded.raw_data, "synced_at": datetime.utcnow()},
+    )
+    db.execute(stmt)
+
+def get_ad_stats(db: Session, cabinet_id: str | None = None):
+    q = db.query(AdCampaignStats)
+    if cabinet_id:
+        q = q.filter(AdCampaignStats.cabinet_id == cabinet_id)
+    return q.order_by(AdCampaignStats.date.desc()).limit(100000).all()
+
+
+# -------------------------
+# Ad Expenses (Расходы на рекламу)
+# -------------------------
+def clear_ad_expenses(db: Session, cabinet_id: str):
+    db.query(AdExpense).filter(AdExpense.cabinet_id == cabinet_id).delete()
+    db.commit()
+
+def upsert_ad_expense(db: Session, cabinet_id: str, item: dict):
+    upd_time = None
+    if item.get("updTime"):
+        try:
+            upd_time = datetime.fromisoformat(item["updTime"].replace("+03:00", "+03:00"))
+        except: pass
+    stmt = pg_insert(AdExpense).values(
+        cabinet_id=cabinet_id, advert_id=item.get("advertId", 0),
+        camp_name=item.get("campName", ""), advert_type=item.get("advertType", 0),
+        advert_status=item.get("advertStatus", 0), payment_type=item.get("paymentType", ""),
+        upd_time=upd_time, upd_sum=item.get("updSum", 0),
+        raw_data=item,
+    ).on_conflict_do_update(
+        constraint="uq_ad_expense",
+        set_={"upd_sum": pg_insert(AdExpense).excluded.upd_sum, "raw_data": pg_insert(AdExpense).excluded.raw_data, "synced_at": datetime.utcnow()},
+    )
+    db.execute(stmt)
+
+def get_ad_expenses(db: Session, cabinet_id: str | None = None):
+    q = db.query(AdExpense)
+    if cabinet_id:
+        q = q.filter(AdExpense.cabinet_id == cabinet_id)
+    return q.order_by(AdExpense.upd_time.desc()).limit(100000).all()
