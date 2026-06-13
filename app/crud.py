@@ -120,12 +120,14 @@ def upsert_stock(db: Session, cabinet_id: str, item: dict):
         quantity=item["quantity"],
         in_way_to_client=item["inWayToClient"],
         in_way_from_client=item["inWayFromClient"],
+        raw_data=item,
     ).on_conflict_do_update(
         constraint="uq_stock",
         set_={
             "quantity": item["quantity"],
             "in_way_to_client": item["inWayToClient"],
             "in_way_from_client": item["inWayFromClient"],
+            "raw_data": item,
             "synced_at": datetime.utcnow(),
         },
     )
@@ -168,6 +170,7 @@ def upsert_orders_chunk(db: Session, cabinet_id: str, chunk: list[dict]):
             "tech_size": o.get("techSize"),
             "sticker": o.get("sticker"),
             "income_id": o.get("incomeID"),
+            "raw_data": o,
             "synced_at": datetime.utcnow(),
         }
         for o in chunk
@@ -181,6 +184,7 @@ def upsert_orders_chunk(db: Session, cabinet_id: str, chunk: list[dict]):
             "finished_price": pg_insert(Order).excluded.finished_price,
             "price_with_disc": pg_insert(Order).excluded.price_with_disc,
             "is_cancel": pg_insert(Order).excluded.is_cancel,
+            "raw_data": pg_insert(Order).excluded.raw_data,
             "synced_at": pg_insert(Order).excluded.synced_at,
         },
     )
@@ -268,6 +272,7 @@ def upsert_price(db: Session, cabinet_id: str, item: dict, size: dict):
         discount=size.get("discount", 0),
         club_discount=size.get("clubDiscount", 0),
         tech_size_name=size.get("techSizeName", ""),
+        raw_data={**item, "size": size},
         synced_at=datetime.utcnow(),
     ).on_conflict_do_update(
         constraint="uq_price",
@@ -277,6 +282,7 @@ def upsert_price(db: Session, cabinet_id: str, item: dict, size: dict):
             "club_discounted_price": size.get("clubDiscountedPrice", 0),
             "discount": size.get("discount", 0),
             "club_discount": size.get("clubDiscount", 0),
+            "raw_data": pg_insert(Price).excluded.raw_data,
             "synced_at": datetime.utcnow(),
         },
     )
@@ -380,6 +386,7 @@ def upsert_sales_report_row(db: Session, cabinet_id: str, row: dict):
         srv_dbs=row.get("srv_dbs"),
         is_legal_entity=row.get("is_legal_entity"),
         report_type=row.get("report_type"),
+        raw_data=row,
         synced_at=datetime.utcnow(),
     ).on_conflict_do_update(
         constraint="uq_sales_report_row",
@@ -389,6 +396,7 @@ def upsert_sales_report_row(db: Session, cabinet_id: str, row: dict):
             "additional_payment": row.get("additional_payment"),
             "storage_fee": row.get("storage_fee"),
             "deduction": row.get("deduction"),
+            "raw_data": pg_insert(SalesReport).excluded.raw_data,
             "synced_at": datetime.utcnow(),
         },
     )
@@ -453,6 +461,7 @@ def upsert_sales_chunk(db: Session, cabinet_id: str, chunk: list[dict]):
             "tech_size": s.get("techSize"),
             "sticker": s.get("sticker"),
             "income_id": s.get("incomeID"),
+            "raw_data": s,
             "synced_at": datetime.utcnow(),
         }
         for s in chunk
@@ -464,6 +473,7 @@ def upsert_sales_chunk(db: Session, cabinet_id: str, chunk: list[dict]):
             "last_change_date": pg_insert(Sale).excluded.last_change_date,
             "for_pay": pg_insert(Sale).excluded.for_pay,
             "finished_price": pg_insert(Sale).excluded.finished_price,
+            "raw_data": pg_insert(Sale).excluded.raw_data,
             "synced_at": pg_insert(Sale).excluded.synced_at,
         },
     )

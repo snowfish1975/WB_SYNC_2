@@ -43,6 +43,7 @@ class Stock(Base):
     in_way_to_client: Mapped[int] = mapped_column(Integer)
     in_way_from_client: Mapped[int] = mapped_column(Integer)
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("cabinet_id", "chrt_id", "warehouse_id", name="uq_stock"),
@@ -93,6 +94,7 @@ class Order(Base):
     
     # Служебные поля
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("cabinet_id", "srid", name="uq_cabinet_order"),
@@ -119,6 +121,7 @@ class Price(Base):
     tech_size_name: Mapped[str] = mapped_column(String(50))
 
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("cabinet_id", "chrt_id", name="uq_price"),
@@ -224,6 +227,7 @@ class SalesReport(Base):
     fix_tariff_date_to: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("cabinet_id", "rrd_id", name="uq_sales_report_row"),
@@ -270,6 +274,7 @@ class Sale(Base):
     income_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
 
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("cabinet_id", "sale_id", name="uq_cabinet_sale"),

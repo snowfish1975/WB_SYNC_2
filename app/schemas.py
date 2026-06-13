@@ -119,7 +119,8 @@ class StockOut(BaseModel):
     in_way_to_client: int
     in_way_from_client: int
     synced_at: datetime
-    seller_name: str  # ✅ новое поле
+    seller_name: str
+    raw_data: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -155,6 +156,7 @@ class OrderOut(BaseModel):
     sticker: str | None = None
     income_id: int | None = None
     synced_at: datetime
+    raw_data: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -172,6 +174,7 @@ class PriceOut(BaseModel):
     tech_size_name: str
     synced_at: datetime
     seller_name: str
+    raw_data: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -217,6 +220,7 @@ class SalesReportRowOut(BaseModel):
     currency_name: str | None = None
     site_country: str | None = None
     synced_at: datetime
+    raw_data: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -254,5 +258,6 @@ class SaleOut(BaseModel):
     sticker: str | None = None
     income_id: int | None = None
     synced_at: datetime
+    raw_data: dict | None = None
 
     model_config = {"from_attributes": True}
