@@ -44,7 +44,6 @@
     try {
       const res = await fetch(`/api/dashboard/summary?days_back=${period}`);
       summaryData = await res.json();
-      populateGlobalCabSelects(summaryData);
       renderSummary();
     } catch(e) {
       grid.innerHTML = `<div style="color:var(--red);padding:20px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Ошибка: ${e.message}</div>`;

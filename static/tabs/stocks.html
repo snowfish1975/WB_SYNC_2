@@ -34,7 +34,6 @@
     try {
       const res = await fetch('/api/dashboard/stocks-summary');
       data = await res.json();
-      populateGlobalCabSelects(data);
     } catch(e) { data = []; }
     stocksFilter();
   }

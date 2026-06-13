@@ -41,7 +41,6 @@
     try {
       const res = await fetch('/api/dashboard/sales-report-summary');
       data = await res.json();
-      populateGlobalCabSelects(data);
       renderSummaryMetrics();
     } catch(e) { data = []; }
     reportFilter();

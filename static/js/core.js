@@ -91,27 +91,8 @@ window.setCabinet = function(cabinet_id) {
   window.dispatchEvent(new CustomEvent('wb:cabinet-changed', { detail: cabinet_id }));
 };
 
-// ---- ЗАПОЛНЕНИЕ СЕЛЕКТОРОВ КАБИНЕТА ----
-window.populateGlobalCabSelects = function(data) {
-  // Собираем уникальные кабинеты из любого массива данных с полем seller_name/cabinet_id
-  const seen = new Set();
-  const cabs = [];
-  for (const r of data) {
-    const id = r.cabinet_id || '';
-    const name = r.seller_name || id.slice(0,8);
-    if (id && !seen.has(id)) { seen.add(id); cabs.push({ cabinet_id: id, seller_name: name }); }
-  }
-  if (cabs.length) {
-    WB.cabinets = cabs;
-    document.querySelectorAll('.global-cab-select').forEach(sel => {
-      const cur = sel.value;
-      sel.innerHTML = '<option value="">Все кабинеты</option>';
-      for (const c of cabs) {
-        sel.innerHTML += `<option value="${c.cabinet_id}" ${cur === c.cabinet_id ? 'selected' : ''}>${c.seller_name}</option>`;
-      }
-    });
-  }
-};
+// ---- populateGlobalCabSelects УДАЛЁН ----
+// Глобальный селект заполняется только из /api/dashboard/cabinets в loadCabinets()
 
 // ---- ПОСЛЕДНЯЯ СИНХРОНИЗАЦИЯ ----
 window.loadLastSync = async function() {
@@ -160,8 +141,6 @@ async function loadCabinets() {
           sel.innerHTML += `<option value="${c.cabinet_id}">${c.seller_name}</option>`;
         }
       });
-      // Автоматически выбираем первый кабинет
-      setCabinet(cabs[0].cabinet_id);
     }
   } catch(e) {}
 }

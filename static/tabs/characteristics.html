@@ -6,9 +6,6 @@
     <div class="section-title">Характеристики товаров</div>
     <div class="filters">
       <input  class="filter-input"  id="charsSearch" placeholder="Артикул / название / бренд..." oninput="charsFilter()">
-      <select class="filter-select" id="charsCabFilter" onchange="charsFilter()">
-        <option value="">Все кабинеты</option>
-      </select>
     </div>
   </div>
 
@@ -176,35 +173,16 @@
     try {
       const res = await fetch('/api/dashboard/characteristics');
       data = await res.json();
-      populateGlobalCabSelects(data);
-      populateCharsCabFilter(data);
     } catch(e) { data = []; }
     charsFilter();
   }
   window.charsLoad = charsLoad;
 
-  function populateCharsCabFilter(items) {
-    const sel = document.getElementById('charsCabFilter');
-    if (!sel) return;
-    const seen = new Set();
-    const cabs = [];
-    for (const r of items) {
-      const id = r.cabinet_id || '';
-      const name = r.seller_name || id.slice(0,8);
-      if (id && !seen.has(id)) { seen.add(id); cabs.push({ id, name }); }
-    }
-    sel.innerHTML = '<option value="">Все кабинеты</option>';
-    for (const c of cabs) {
-      sel.innerHTML += `<option value="${c.id}">${c.name}</option>`;
-    }
-  }
-
   function charsFilter() {
     const search = (document.getElementById('charsSearch')?.value || '').toLowerCase();
-    const cab = document.getElementById('charsCabFilter')?.value || WB.cabinet || '';
 
     filtered = data.filter(r => {
-      if (cab && r.cabinet_id !== cab) return false;
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
       if (!search) return true;
       const c = r.characteristics || {};
       const hay = `${r.nm_id||''} ${c.title||''} ${c.brand||''} ${c.vendorCode||''} ${c.subjectName||''}`.toLowerCase();
