@@ -349,6 +349,34 @@ def dashboard_top_products(days_back: int = Query(40, ge=1, le=90), limit: int =
     return result
 
 
+@app.get("/api/dashboard/characteristics")
+def dashboard_characteristics(
+    days_back: int = Query(40, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    """Все карточки товаров для дашборда (без токена)."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+    data = (
+        db.query(ProductCharacteristic)
+        .filter(ProductCharacteristic.synced_at >= threshold)
+        .order_by(ProductCharacteristic.synced_at.desc())
+        .limit(5000)
+        .all()
+    )
+    return [
+        {
+            "id": item.id,
+            "cabinet_id": item.cabinet_id,
+            "nm_id": item.nm_id,
+            "characteristics": item.characteristics,
+            "synced_at": item.synced_at.isoformat() if item.synced_at else None,
+            "seller_name": mapping.get(item.cabinet_id, item.cabinet_id[:8]),
+        }
+        for item in data
+    ]
+
+
 @app.get("/api/dashboard/stocks-summary")
 def dashboard_stocks_summary(db: Session = Depends(get_db)):
     """Остатки сгруппированные по товару."""

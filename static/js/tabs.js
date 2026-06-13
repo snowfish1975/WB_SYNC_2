@@ -8,6 +8,7 @@ const TAB_SRCS = {
   stocks:       '/static/tabs/stocks.html',
   top:          '/static/tabs/top-products.html',
   report:       '/static/tabs/sales-report.html',
+  chars:        '/static/tabs/characteristics.html',
 };
 
 const loadedTabs = new Set();

@@ -1,0 +1,375 @@
+<!-- ============================================================
+     TAB: ХАРАКТЕРИСТИКИ
+     ============================================================ -->
+<div id="charsTab">
+  <div class="card section-mb">
+    <div class="section-title">Характеристики товаров</div>
+    <div class="filters">
+      <input  class="filter-input"  id="charsSearch" placeholder="Артикул / название / бренд..." oninput="charsFilter()">
+      <select class="filter-select" id="charsCabFilter" onchange="charsFilter()">
+        <option value="">Все кабинеты</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Карточка товара -->
+  <div class="card section-mb" id="charCard" style="display:none;">
+    <div class="char-card-layout">
+      <!-- Фото -->
+      <div class="char-photo-wrap">
+        <img id="charPhoto" class="char-photo" src="" alt="" onerror="this.style.display='none'">
+        <div id="charPhotoPlaceholder" class="char-photo-placeholder">Нет фото</div>
+        <div class="char-nav">
+          <button class="char-nav-btn" onclick="charsNav(-1)">← Назад</button>
+          <span class="char-nav-info" id="charNavInfo">1 / 1</span>
+          <button class="char-nav-btn" onclick="charsNav(1)">Вперёд →</button>
+        </div>
+      </div>
+      <!-- Инфо -->
+      <div class="char-info">
+        <div class="char-title" id="charTitle">—</div>
+        <div class="char-meta" id="charMeta"></div>
+        <div class="char-desc" id="charDesc"></div>
+        <div class="char-opts" id="charOpts"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Таблица -->
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="charsSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="charsSort('nm_id')">АРТ WB ↕</th>
+          <th onclick="charsSort('title')">НАЗВАНИЕ ↕</th>
+          <th onclick="charsSort('brand')">БРЕНД ↕</th>
+          <th onclick="charsSort('subject')">КАТЕГОРИЯ ↕</th>
+          <th onclick="charsSort('vendorCode')">АРТ ПРОДАВЦА ↕</th>
+          <th>ФОТО</th>
+          <th onclick="charsSort('synced_at')">СИНХР ↕</th>
+        </tr></thead>
+        <tbody id="charsBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="charsPagination"></div>
+  </div>
+</div>
+
+<style>
+.char-card-layout {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 900px) { .char-card-layout { grid-template-columns: 1fr; } }
+
+.char-photo-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.char-photo {
+  width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: var(--bg3);
+}
+.char-photo-placeholder {
+  width: 100%;
+  height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg3);
+  border-radius: 8px;
+  color: var(--text3);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+}
+.char-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.char-nav-btn {
+  padding: 5px 14px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: all 0.15s;
+}
+.char-nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+.char-nav-info {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.char-info { min-width: 0; }
+.char-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px;
+  letter-spacing: 1px;
+  color: var(--text);
+  margin-bottom: 8px;
+  line-height: 1.2;
+}
+.char-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.char-meta .badge {
+  font-size: 11px;
+  padding: 3px 10px;
+}
+.char-desc {
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.6;
+  margin-bottom: 16px;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.char-opts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+}
+.char-opt {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.char-opt-name {
+  color: var(--text3);
+  font-family: 'IBM Plex Mono', monospace;
+  white-space: nowrap;
+  min-width: 100px;
+}
+.char-opt-val { color: var(--text); }
+
+.chars-row-active { background: var(--bg3) !important; }
+</style>
+
+<script>
+(function() {
+  let data = [], filtered = [], page = 1;
+  let sortCol = 'synced_at', sortDir = -1;
+  const PER = 50;
+  let charIdx = 0;
+
+  async function charsLoad() {
+    document.getElementById('charsBody').innerHTML = '';
+    try {
+      const res = await fetch('/api/dashboard/characteristics');
+      data = await res.json();
+      populateGlobalCabSelects(data);
+      populateCharsCabFilter(data);
+    } catch(e) { data = []; }
+    charsFilter();
+  }
+  window.charsLoad = charsLoad;
+
+  function populateCharsCabFilter(items) {
+    const sel = document.getElementById('charsCabFilter');
+    if (!sel) return;
+    const seen = new Set();
+    const cabs = [];
+    for (const r of items) {
+      const id = r.cabinet_id || '';
+      const name = r.seller_name || id.slice(0,8);
+      if (id && !seen.has(id)) { seen.add(id); cabs.push({ id, name }); }
+    }
+    sel.innerHTML = '<option value="">Все кабинеты</option>';
+    for (const c of cabs) {
+      sel.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+    }
+  }
+
+  function charsFilter() {
+    const search = (document.getElementById('charsSearch')?.value || '').toLowerCase();
+    const cab = document.getElementById('charsCabFilter')?.value || WB.cabinet || '';
+
+    filtered = data.filter(r => {
+      if (cab && r.cabinet_id !== cab) return false;
+      if (!search) return true;
+      const c = r.characteristics || {};
+      const hay = `${r.nm_id||''} ${c.title||''} ${c.brand||''} ${c.vendorCode||''} ${c.subjectName||''}`.toLowerCase();
+      return hay.includes(search);
+    });
+    sortData();
+  }
+  window.charsFilter = charsFilter;
+
+  function charsSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+    sortData();
+  }
+  window.charsSort = charsSort;
+
+  function getSortVal(r, col) {
+    if (col === 'synced_at') return r.synced_at || '';
+    const c = r.characteristics || {};
+    if (col === 'title') return c.title || '';
+    if (col === 'brand') return c.brand || '';
+    if (col === 'subject') return c.subjectName || '';
+    if (col === 'vendorCode') return c.vendorCode || '';
+    if (col === 'seller_name') return r.seller_name || '';
+    return r[col] ?? '';
+  }
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = getSortVal(a, sortCol), vb = getSortVal(b, sortCol);
+      if (va == null) va = ''; if (vb == null) vb = '';
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    page = 1;
+    charIdx = 0;
+    render();
+    renderCard();
+  }
+
+  function render() {
+    const body = document.getElementById('charsBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:30px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Нет данных</td></tr>`;
+      document.getElementById('charsPagination').innerHTML = '';
+      document.getElementById('charCard').style.display = 'none';
+      return;
+    }
+
+    body.innerHTML = slice.map((r, i) => {
+      const c = r.characteristics || {};
+      const photos = c.photos || [];
+      const thumb = photos.length ? photos[0].big || photos[0].origin || '' : '';
+      const gi = (page-1)*PER + i;
+      const active = gi === charIdx ? ' chars-row-active' : '';
+      return `<tr class="fade-in${active}" style="cursor:pointer" onclick="charsSelect(${gi})">
+        <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+        <td class="td-mono">${r.nm_id || '—'}</td>
+        <td>${esc(c.title || '—')}</td>
+        <td>${esc(c.brand || '—')}</td>
+        <td>${esc(c.subjectName || '—')}</td>
+        <td class="td-mono">${esc(c.vendorCode || '—')}</td>
+        <td>${thumb ? '<img src="'+esc(thumb)+'" style="height:32px;border-radius:3px;">' : '—'}</td>
+        <td class="td-mono">${fmtDate(r.synced_at)}</td>
+      </tr>`;
+    }).join('');
+
+    renderPagination('charsPagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  function renderCard() {
+    const card = document.getElementById('charCard');
+    if (!filtered.length) { card.style.display = 'none'; return; }
+    card.style.display = '';
+
+    const r = filtered[charIdx];
+    if (!r) return;
+    const c = r.characteristics || {};
+    const photos = c.photos || [];
+
+    // Фото
+    const photo = photos.length ? (photos[0].big || photos[0].origin || '') : '';
+    const img = document.getElementById('charPhoto');
+    const ph = document.getElementById('charPhotoPlaceholder');
+    if (photo) {
+      img.src = photo;
+      img.style.display = '';
+      ph.style.display = 'none';
+    } else {
+      img.style.display = 'none';
+      ph.style.display = '';
+    }
+
+    // Навигация
+    document.getElementById('charNavInfo').textContent = `${charIdx + 1} / ${filtered.length}`;
+
+    // Заголовок + мета
+    document.getElementById('charTitle').textContent = c.title || `Товар #${r.nm_id}`;
+    document.getElementById('charMeta').innerHTML = [
+      `<span class="badge badge-orange">${esc(r.seller_name || '')}</span>`,
+      r.nm_id ? `<span class="badge badge-green">WB #${r.nm_id}</span>` : '',
+      c.vendorCode ? `<span class="badge" style="background:var(--bg3);color:var(--text2)">${esc(c.vendorCode)}</span>` : '',
+      c.brand ? `<span class="badge" style="background:rgba(168,85,247,0.12);color:#a855f7">${esc(c.brand)}</span>` : '',
+    ].filter(Boolean).join('');
+
+    // Описание
+    const desc = document.getElementById('charDesc');
+    desc.textContent = c.description || '';
+    desc.style.display = c.description ? '' : 'none';
+
+    // Характеристики
+    const opts = c.opts || [];
+    const optsEl = document.getElementById('charOpts');
+    if (opts.length) {
+      optsEl.innerHTML = opts.map(o => {
+        const name = o.name || o.paramName || '';
+        const val = o.value || o.paramValue || '';
+        return `<div class="char-opt"><span class="char-opt-name">${esc(name)}</span><span class="char-opt-val">${esc(val)}</span></div>`;
+      }).join('');
+    } else {
+      // Fallback: показываем ключевые поля
+      const fallback = [
+        ['Цвет', c.color],
+        ['Размер', c.size],
+        ['Артикул поставщика', c.vendorCode],
+        ['Предмет', c.subjectName],
+        ['Бренд', c.brand],
+        ['Вес', c.weight],
+        ['Длина', c.length],
+        ['Ширина', c.width],
+        ['Высота', c.height],
+      ].filter(([,v]) => v);
+      optsEl.innerHTML = fallback.map(([k,v]) =>
+        `<div class="char-opt"><span class="char-opt-name">${esc(k)}</span><span class="char-opt-val">${esc(String(v))}</span></div>`
+      ).join('');
+    }
+
+    // Подсветка строки в таблице
+    document.querySelectorAll('#charsBody tr').forEach((tr, i) => {
+      tr.classList.toggle('chars-row-active', (page-1)*PER + i === charIdx);
+    });
+  }
+
+  window.charsNav = function(dir) {
+    if (!filtered.length) return;
+    charIdx = (charIdx + dir + filtered.length) % filtered.length;
+    renderCard();
+    // Прокрутка к нужной странице таблицы
+    const targetPage = Math.floor(charIdx / PER) + 1;
+    if (targetPage !== page) { page = targetPage; render(); }
+  };
+
+  window.charsSelect = function(idx) {
+    charIdx = idx;
+    renderCard();
+  };
+
+  function esc(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  window.addEventListener('wb:tab-activated:chars', charsLoad);
+  window.addEventListener('wb:cabinet-changed', () => { if (data.length) charsFilter(); });
+})();
+</script>
