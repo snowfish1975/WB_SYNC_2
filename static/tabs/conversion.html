@@ -1,0 +1,229 @@
+<!-- ============================================================
+     TAB: ВОРОНКА КОНВЕРСИИ
+     ============================================================ -->
+<div id="funnelTab">
+  <div class="summary-grid section-mb" id="funnelMetrics"></div>
+
+  <div class="two-col section-mb">
+    <div class="card">
+      <div class="section-title">Воронка продаж (средняя)</div>
+      <div style="padding:20px 0;">
+        <div class="funnel-bar-wrap">
+          <div class="funnel-step">
+            <div class="funnel-label">Просмотры</div>
+            <div class="funnel-bar"><div class="funnel-fill" id="fStep1" style="width:100%;background:var(--accent)"></div></div>
+            <div class="funnel-val" id="fVal1">0</div>
+          </div>
+          <div class="funnel-step">
+            <div class="funnel-label">В корзину</div>
+            <div class="funnel-bar"><div class="funnel-fill" id="fStep2" style="width:0%;background:var(--accent3)"></div></div>
+            <div class="funnel-val" id="fVal2">0</div>
+          </div>
+          <div class="funnel-step">
+            <div class="funnel-label">Заказы</div>
+            <div class="funnel-bar"><div class="funnel-fill" id="fStep3" style="width:0%;background:var(--accent2)"></div></div>
+            <div class="funnel-val" id="fVal3">0</div>
+          </div>
+          <div class="funnel-step">
+            <div class="funnel-label">Выкуплено</div>
+            <div class="funnel-bar"><div class="funnel-fill" id="fStep4" style="width:0%;background:var(--green)"></div></div>
+            <div class="funnel-val" id="fVal4">0</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">Динамика vs прошлый период</div>
+      <div id="funnelDynStats" style="padding:20px 0;"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Конверсия по товарам</div>
+    <div class="filters">
+      <input class="filter-input" id="funnelSearch" placeholder="Артикул / товар / бренд..." oninput="funnelFilter()">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="funnelSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="funnelSort('nm_id')">АРТ WB ↕</th>
+          <th onclick="funnelSort('vendor_code')">АРТ ПОСТАВЩИКА ↕</th>
+          <th onclick="funnelSort('product_name')">ТОВАР ↕</th>
+          <th onclick="funnelSort('open_count')">ПРОСМОТРЫ ↕</th>
+          <th onclick="funnelSort('past_open_count')">ПРОСМ. (ПРОШЛ.) ↕</th>
+          <th onclick="funnelSort('dynamic_open')">Δ ПРОСМ. ↕</th>
+          <th onclick="funnelSort('conv_add_to_cart')">КОНВ. КОРЗИНА ↕</th>
+          <th onclick="funnelSort('conv_cart_to_order')">КОНВ. ЗАКАЗ ↕</th>
+          <th onclick="funnelSort('conv_buyout')">ВЫКУП % ↕</th>
+          <th onclick="funnelSort('dynamic_buyout')">Δ ВЫКУПА ↕</th>
+        </tr></thead>
+        <tbody id="funnelBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="funnelPagination"></div>
+  </div>
+</div>
+
+<style>
+.funnel-bar-wrap { display: flex; flex-direction: column; gap: 14px; }
+.funnel-step { display: grid; grid-template-columns: 120px 1fr 80px; align-items: center; gap: 12px; }
+.funnel-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 1px; }
+.funnel-bar { height: 24px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
+.funnel-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+.funnel-val { font-family: 'Bebas Neue', sans-serif; font-size: 18px; color: var(--text); text-align: right; }
+.funnel-stat { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.funnel-stat:last-child { border-bottom: none; }
+.funnel-stat-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; }
+.funnel-stat-value { font-family: 'Bebas Neue', sans-serif; font-size: 28px; }
+.dynamic-pos { color: var(--green); }
+.dynamic-neg { color: var(--red); }
+.dynamic-zero { color: var(--text3); }
+</style>
+
+<script>
+(function() {
+  let data = [], filtered = [], page = 1;
+  const PER = 50;
+  let sortCol = 'order_sum', sortDir = -1;
+
+  async function funnelLoad() {
+    document.getElementById('funnelBody').innerHTML = '';
+    try {
+      const res = await fetch(`/api/dashboard/funnel?days_back=${WB.period}`);
+      data = await res.json();
+    } catch(e) { data = []; }
+    funnelFilter();
+    renderFunnelChart();
+    renderDynStats();
+  }
+  window.funnelLoad = funnelLoad;
+
+  function funnelFilter() {
+    const search = (document.getElementById('funnelSearch')?.value || '').toLowerCase();
+    filtered = data.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (search && !`${r.vendor_code||''} ${r.product_name||''} ${r.brand_name||''} ${r.nm_id||''}`.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortData();
+  }
+  window.funnelFilter = funnelFilter;
+
+  function funnelSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+    sortData();
+  }
+  window.funnelSort = funnelSort;
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) va = 0; if (vb == null) vb = 0;
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    page = 1;
+    render();
+  }
+
+  function renderFunnelChart() {
+    const d = WB.cabinet ? data.filter(r => r.cabinet_id === WB.cabinet) : data;
+    let tOpen=0, tCart=0, tOrders=0, tBuyout=0;
+    for (const r of d) {
+      tOpen += r.open_count || 0;
+      tCart += r.cart_count || 0;
+      tOrders += r.order_count || 0;
+      tBuyout += r.buyout_count || 0;
+    }
+    const max = tOpen || 1;
+    document.getElementById('fStep1').style.width = '100%';
+    document.getElementById('fStep2').style.width = (tCart / max * 100) + '%';
+    document.getElementById('fStep3').style.width = (tOrders / max * 100) + '%';
+    document.getElementById('fStep4').style.width = (tBuyout / max * 100) + '%';
+    document.getElementById('fVal1').textContent = fmt(tOpen);
+    document.getElementById('fVal2').textContent = fmt(tCart);
+    document.getElementById('fVal3').textContent = fmt(tOrders);
+    document.getElementById('fVal4').textContent = fmt(tBuyout);
+  }
+
+  function renderDynStats() {
+    const el = document.getElementById('funnelDynStats');
+    if (!el) return;
+    const d = WB.cabinet ? data.filter(r => r.cabinet_id === WB.cabinet) : data;
+    let tOpen=0, tPastOpen=0, tCart=0, tPastCart=0, tOrders=0, tPastOrders=0, tBuyout=0, tPastBuyout=0;
+    for (const r of d) {
+      tOpen += r.open_count || 0;
+      tPastOpen += r.past_open_count || 0;
+      tCart += r.cart_count || 0;
+      tPastCart += r.past_cart_count || 0;
+      tOrders += r.order_count || 0;
+      tPastOrders += r.past_order_count || 0;
+      tBuyout += r.buyout_count || 0;
+      tPastBuyout += r.past_buyout_count || 0;
+    }
+    const dyn = (cur, prev) => prev > 0 ? ((cur - prev) / prev * 100).toFixed(1) : '—';
+    const cls = (cur, prev) => prev === 0 ? 'dynamic-zero' : cur >= prev ? 'dynamic-pos' : 'dynamic-neg';
+
+    const convCartNow = tOpen > 0 ? (tCart / tOpen * 100).toFixed(1) : 0;
+    const convCartPast = tPastOpen > 0 ? (tPastCart / tPastOpen * 100).toFixed(1) : 0;
+    const convOrderNow = tCart > 0 ? (tOrders / tCart * 100).toFixed(1) : 0;
+    const convOrderPast = tPastCart > 0 ? (tPastOrders / tPastCart * 100).toFixed(1) : 0;
+    const buyoutNow = tOrders > 0 ? (tBuyout / tOrders * 100).toFixed(1) : 0;
+    const buyoutPast = tPastOrders > 0 ? (tPastBuyout / tPastOrders * 100).toFixed(1) : 0;
+
+    el.innerHTML = `
+      <div class="funnel-stat"><div class="funnel-stat-label">Просмотры</div><div class="funnel-stat-value"><span class="${cls(tOpen,tPastOpen)}">${dyn(tOpen,tPastOpen)}%</span></div></div>
+      <div class="funnel-stat"><div class="funnel-stat-label">В корзину</div><div class="funnel-stat-value"><span class="${cls(tCart,tPastCart)}">${dyn(tCart,tPastCart)}%</span></div></div>
+      <div class="funnel-stat"><div class="funnel-stat-label">Заказы</div><div class="funnel-stat-value"><span class="${cls(tOrders,tPastOrders)}">${dyn(tOrders,tPastOrders)}%</span></div></div>
+      <div class="funnel-stat"><div class="funnel-stat-label">Выкупы</div><div class="funnel-stat-value"><span class="${cls(tBuyout,tPastBuyout)}">${dyn(tBuyout,tPastBuyout)}%</span></div></div>
+      <div class="funnel-stat" style="background:var(--bg3);margin-top:8px;padding:12px;border-radius:8px;">
+        <div class="funnel-stat-label">Конверсия в корзину</div>
+        <div class="funnel-stat-value" style="color:var(--accent3)">${convCartNow}% <span style="font-size:14px;color:var(--text3)">→ ${convCartPast}%</span></div>
+      </div>
+      <div class="funnel-stat" style="background:var(--bg3);padding:12px;border-radius:8px;">
+        <div class="funnel-stat-label">Конверсия в заказ</div>
+        <div class="funnel-stat-value" style="color:var(--accent2)">${convOrderNow}% <span style="font-size:14px;color:var(--text3)">→ ${convOrderPast}%</span></div>
+      </div>
+      <div class="funnel-stat" style="background:var(--bg3);padding:12px;border-radius:8px;">
+        <div class="funnel-stat-label">Процент выкупа</div>
+        <div class="funnel-stat-value" style="color:var(--green)">${buyoutNow}% <span style="font-size:14px;color:var(--text3)">→ ${buyoutPast}%</span></div>
+      </div>
+    `;
+  }
+
+  function dynArrow(val) {
+    if (val > 0) return `<span class="dynamic-pos">▲ +${val}%</span>`;
+    if (val < 0) return `<span class="dynamic-neg">▼ ${val}%</span>`;
+    return `<span class="dynamic-zero">— 0%</span>`;
+  }
+
+  function render() {
+    const body = document.getElementById('funnelBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:30px;">Нет данных</td></tr>`;
+      document.getElementById('funnelPagination').innerHTML = '';
+      return;
+    }
+    body.innerHTML = slice.map(r => `<tr class="fade-in">
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td class="td-mono">${r.nm_id}</td>
+      <td>${r.vendor_code || '—'}</td>
+      <td>${r.product_name || '—'}</td>
+      <td class="td-mono">${fmt(r.open_count)}</td>
+      <td class="td-mono" style="color:var(--text3)">${fmt(r.past_open_count)}</td>
+      <td class="td-mono">${dynArrow(r.dynamic_open)}</td>
+      <td class="td-mono">${r.conv_add_to_cart}%</td>
+      <td class="td-mono">${r.conv_cart_to_order}%</td>
+      <td class="td-mono" style="color:var(--green)">${r.conv_buyout}%</td>
+      <td class="td-mono">${dynArrow(r.dynamic_buyout)}</td>
+    </tr>`).join('');
+    renderPagination('funnelPagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  window.addEventListener('wb:tab-activated:funnel', funnelLoad);
+  window.addEventListener('wb:cabinet-changed', () => { if (data.length) { funnelFilter(); renderFunnelChart(); renderDynStats(); } });
+})();
+</script>

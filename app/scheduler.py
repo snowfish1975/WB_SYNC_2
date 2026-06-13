@@ -15,11 +15,16 @@ from app.wb_client import (
     fetch_sales_report,
     fetch_sales_stream,
 )
+from app.wb_analytics_client import fetch_sales_funnel, fetch_stock_by_offices, fetch_item_rating
 from app.crud import (
     upsert_characteristic, upsert_stock, log_sync, upsert_price,
     upsert_sales_report_row, upsert_orders_bulk, upsert_sales_bulk,
     clear_characteristics, clear_stocks, clear_old_orders, clear_old_sales,
     clear_sales_report, get_tokens_from_db, get_token_mapping_from_db, load_token_mapping,
+    clear_shelf_metrics, upsert_shelf_metric,
+    clear_funnel_metrics, upsert_funnel_metric,
+    clear_stock_by_offices, upsert_stock_by_office,
+    clear_item_ratings, upsert_item_rating,
 )
 from app.database import SessionLocal
 
@@ -120,6 +125,10 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
         "orders_count": 0,
         "prices_count": 0,
         "sales_count": 0,
+        "shelf_count": 0,
+        "funnel_count": 0,
+        "offices_count": 0,
+        "ratings_count": 0,
         "orders_error": None,
         "error": None,
     }
@@ -211,7 +220,66 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
         clear_old_orders(db, tid, days=40)
         clear_old_sales(db, tid, days=40)
 
-        log_sync(db, tid, "ok", records=chars_count + stocks_count + orders_count + prices_count + sales_count)
+        # --- Воронка продаж (sales-funnel v3, 30 дней) ---
+        try:
+            now_ms = datetime.now(MOSCOW_TZ)
+            date_from = (now_ms - timedelta(days=30)).strftime("%Y-%m-%d")
+            date_to = now_ms.strftime("%Y-%m-%d")
+            period_start = datetime.strptime(date_from, "%Y-%m-%d")
+            period_end = datetime.strptime(date_to, "%Y-%m-%d")
+
+            logger.info(f"[{name}] очистка метрик витрины...")
+            clear_shelf_metrics(db, tid)
+            logger.info(f"[{name}] загрузка воронки продаж ({date_from} — {date_to})...")
+            funnel_data = await fetch_sales_funnel(token, date_from=date_from, date_to=date_to)
+            shelf_count = 0
+            funnel_count = 0
+            for item in funnel_data:
+                upsert_shelf_metric(db, tid, item, period_start, period_end)
+                shelf_count += 1
+                upsert_funnel_metric(db, tid, item, period_start, period_end)
+                funnel_count += 1
+            db.commit()
+            result["shelf_count"] = shelf_count
+            result["funnel_count"] = funnel_count
+            del funnel_data
+            gc.collect()
+            logger.info(f"[{name}] Воронка продаж сохранена: {shelf_count} товаров")
+
+            # --- Остатки по складам ---
+            logger.info(f"[{name}] загрузка остатков по складам...")
+            offices_data = await fetch_stock_by_offices(token, date_from=date_from, date_to=date_to)
+            offices_count = 0
+            for region in offices_data:
+                for office in region.get("offices", []):
+                    upsert_stock_by_office(db, tid, region, office, period_start, period_end)
+                    offices_count += 1
+            db.commit()
+            result["offices_count"] = offices_count
+            del offices_data
+            gc.collect()
+            logger.info(f"[{name}] Остатки по складам: {offices_count} записей")
+
+            # --- Оценки товаров (end date не может быть сегодня) ---
+            yesterday = (now_ms - timedelta(days=1)).strftime("%Y-%m-%d")
+            logger.info(f"[{name}] загрузка оценок товаров...")
+            ratings_data, seller_rating = await fetch_item_rating(token, date_from=date_from, date_to=yesterday)
+            ratings_count = 0
+            for card in ratings_data:
+                upsert_item_rating(db, tid, card, seller_rating, period_start, period_end)
+                ratings_count += 1
+            db.commit()
+            result["ratings_count"] = ratings_count
+            del ratings_data
+            gc.collect()
+            logger.info(f"[{name}] Оценки товаров: {ratings_count} товаров, рейтинг продавца: {seller_rating}")
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"[{name}] ошибка аналитики: {e}")
+            result["analytics_error"] = str(e)[:200]
+
+        log_sync(db, tid, "ok", records=chars_count + stocks_count + orders_count + prices_count + sales_count + result.get("shelf_count", 0) + result.get("funnel_count", 0) + result.get("offices_count", 0) + result.get("ratings_count", 0))
         db.commit()
 
     except Exception as e:
@@ -324,6 +392,10 @@ def run_sync_all():
                 message += f"   • Продажи: {r.get('sales_count', 0)}\n"
                 if r.get('sales_error'):
                     message += f"   ⚠️ Ошибка продаж: {r['sales_error'][:80]}\n"
+                if r.get('shelf_count', 0) > 0 or r.get('funnel_count', 0) > 0:
+                    message += f"   • Витрина: {r.get('shelf_count', 0)} | Воронка: {r.get('funnel_count', 0)}\n"
+                if r.get('analytics_error'):
+                    message += f"   ⚠️ Ошибка аналитики: {r['analytics_error'][:80]}\n"
                 message += "\n"
 
         message += f"📊 <b>Итог:</b> успешно: {success_count}, ошибок: {error_count}"

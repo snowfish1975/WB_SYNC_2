@@ -1,0 +1,141 @@
+<!-- ============================================================
+     TAB: ОЦЕНКИ И ОТЗЫВЫ
+     ============================================================ -->
+<div id="itemRatingsTab">
+  <div class="summary-grid section-mb" id="itemRatingsMetrics"></div>
+
+  <div class="card">
+    <div class="section-title">Оценки и отзывы товаров</div>
+    <div class="filters">
+      <input class="filter-input" id="irSearch" placeholder="Артикул / товар / бренд..." oninput="irFilter()">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="irSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="irSort('nm_id')">АРТ WB ↕</th>
+          <th onclick="irSort('vendor_code')">АРТ ПОСТАВЩИКА ↕</th>
+          <th onclick="irSort('product_name')">ТОВАР ↕</th>
+          <th onclick="irSort('feedback_rating')">РЕЙТИНГ ↕</th>
+          <th onclick="irSort('feedback_count')">ОТЗЫВЫ ↕</th>
+          <th onclick="irSort('five_star')">5★ ↕</th>
+          <th onclick="irSort('four_star')">4★ ↕</th>
+          <th onclick="irSort('three_star')">3★ ↕</th>
+          <th onclick="irSort('two_star')">2★ ↕</th>
+          <th onclick="irSort('one_star')">1★ ↕</th>
+          <th onclick="irSort('feedback_percentile')">ПЕРЦЕНТИЛЬ ↕</th>
+        </tr></thead>
+        <tbody id="irBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="irPagination"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let data = [], filtered = [], page = 1;
+  const PER = 50;
+  let sortCol = 'feedback_count', sortDir = -1;
+
+  async function irLoad() {
+    document.getElementById('irBody').innerHTML = '';
+    try {
+      const res = await fetch(`/api/dashboard/item-ratings?days_back=${WB.period}`);
+      data = await res.json();
+    } catch(e) { data = []; }
+    irFilter();
+    renderMetrics();
+  }
+  window.irLoad = irLoad;
+
+  function irFilter() {
+    const search = (document.getElementById('irSearch')?.value || '').toLowerCase();
+    filtered = data.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (search && !`${r.vendor_code||''} ${r.product_name||''} ${r.brand_name||''} ${r.nm_id||''}`.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortData();
+  }
+  window.irFilter = irFilter;
+
+  function irSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+    sortData();
+  }
+  window.irSort = irSort;
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) va = 0; if (vb == null) vb = 0;
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    page = 1;
+    render();
+  }
+
+  function renderMetrics() {
+    const m = document.getElementById('itemRatingsMetrics');
+    if (!m) return;
+    let totalFeedback=0, totalFive=0, totalFour=0, totalThree=0, totalTwo=0, totalOne=0;
+    let avgRating=0, ratingCount=0;
+    const d = WB.cabinet ? data.filter(r => r.cabinet_id === WB.cabinet) : data;
+    for (const r of d) {
+      totalFeedback += r.feedback_count || 0;
+      totalFive += r.five_star || 0;
+      totalFour += r.four_star || 0;
+      totalThree += r.three_star || 0;
+      totalTwo += r.two_star || 0;
+      totalOne += r.one_star || 0;
+      if (r.feedback_rating > 0) { avgRating += r.feedback_rating; ratingCount++; }
+    }
+    const avgR = ratingCount > 0 ? (avgRating / ratingCount).toFixed(2) : 0;
+    m.innerHTML = `
+      <div class="card metric-card green"><div class="metric-label">РЕЙТИНГ СРЕДНИЙ</div><div class="metric-value">${avgR}</div><div class="metric-sub">${d.length} товаров</div></div>
+      <div class="card metric-card teal"><div class="metric-label">ОТЗЫВОВ</div><div class="metric-value">${fmt(totalFeedback)}</div></div>
+      <div class="card metric-card"><div class="metric-label">5★</div><div class="metric-value" style="color:var(--green)">${fmt(totalFive)}</div></div>
+      <div class="card metric-card"><div class="metric-label">4★</div><div class="metric-value" style="color:var(--accent2)">${fmt(totalFour)}</div></div>
+      <div class="card metric-card"><div class="metric-label">1★</div><div class="metric-value" style="color:var(--red)">${fmt(totalOne)}</div></div>
+    `;
+  }
+
+  function ratingColor(r) {
+    if (r >= 4.5) return 'var(--green)';
+    if (r >= 4.0) return 'var(--accent2)';
+    if (r >= 3.0) return 'var(--accent)';
+    return 'var(--red)';
+  }
+
+  function render() {
+    const body = document.getElementById('irBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:30px;">Нет данных</td></tr>`;
+      document.getElementById('irPagination').innerHTML = '';
+      return;
+    }
+    body.innerHTML = slice.map(r => `<tr class="fade-in">
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td class="td-mono">${r.nm_id}</td>
+      <td>${r.vendor_code || '—'}</td>
+      <td>${r.product_name || '—'}</td>
+      <td class="td-mono" style="color:${ratingColor(r.feedback_rating)}; font-weight:bold">${r.feedback_rating}</td>
+      <td class="td-mono">${fmt(r.feedback_count)}</td>
+      <td class="td-mono" style="color:var(--green)">${fmt(r.five_star)}</td>
+      <td class="td-mono" style="color:var(--accent2)">${fmt(r.four_star)}</td>
+      <td class="td-mono">${fmt(r.three_star)}</td>
+      <td class="td-mono" style="color:var(--accent)">${fmt(r.two_star)}</td>
+      <td class="td-mono" style="color:var(--red)">${fmt(r.one_star)}</td>
+      <td class="td-mono">${r.feedback_percentile}%</td>
+    </tr>`).join('');
+    renderPagination('irPagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  window.addEventListener('wb:tab-activated:item-ratings', irLoad);
+  window.addEventListener('wb:cabinet-changed', () => { if (data.length) { irFilter(); renderMetrics(); } });
+})();
+</script>

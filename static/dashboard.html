@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WB Sync — Дашборд</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/themes.css">
-<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/themes.css?v=3">
+<link rel="stylesheet" href="/static/base.css?v=3">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="/static/js/core.js"></script>
+<script src="/static/js/core.js?v=3"></script>
 </head>
 <body>
 
@@ -56,6 +56,10 @@
   <button class="tab-btn" data-tab="stocks"   onclick="switchTab('stocks')">📦 Остатки</button>
   <button class="tab-btn" data-tab="top"      onclick="switchTab('top')">🏆 Топ товаров</button>
   <button class="tab-btn" data-tab="report"   onclick="switchTab('report')">💰 Отчёт реализации</button>
+  <button class="tab-btn" data-tab="shelf"    onclick="switchTab('shelf')">🏪 Витрина</button>
+  <button class="tab-btn" data-tab="funnel"   onclick="switchTab('funnel')">🔄 Конверсия</button>
+  <button class="tab-btn" data-tab="stock-offices" onclick="switchTab('stock-offices')">🏭 Склады</button>
+  <button class="tab-btn" data-tab="item-ratings"  onclick="switchTab('item-ratings')">⭐ Оценки</button>
   <button class="tab-btn" data-tab="chars"    onclick="switchTab('chars')">📋 Характеристики</button>
   <button class="tab-btn" data-tab="abcxyz"   onclick="switchTab('abcxyz')">📐 ABC/XYZ</button>
 </nav>
@@ -67,11 +71,15 @@
   <div id="tab-stocks"  class="tab-content"></div>
   <div id="tab-top"     class="tab-content"></div>
   <div id="tab-report"  class="tab-content"></div>
+  <div id="tab-shelf"   class="tab-content"></div>
+  <div id="tab-funnel"  class="tab-content"></div>
+  <div id="tab-stock-offices" class="tab-content"></div>
+  <div id="tab-item-ratings"  class="tab-content"></div>
   <div id="tab-chars"   class="tab-content"></div>
   <div id="tab-abcxyz"  class="tab-content"></div>
 </div>
 
-<script src="/static/js/tabs.js"></script>
+<script src="/static/js/tabs.js?v=3"></script>
 <script>
   // Загружаем последнюю синхронизацию при старте
   document.addEventListener('DOMContentLoaded', loadLastSync);

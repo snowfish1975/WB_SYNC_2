@@ -1,0 +1,135 @@
+<!-- ============================================================
+     TAB: ВИТРИНА ПРОДАЖ
+     ============================================================ -->
+<div id="shelfTab">
+  <div class="summary-grid section-mb" id="shelfMetrics"></div>
+
+  <div class="card">
+    <div class="section-title">Витрина продаж — просмотры, конверсия, заказы</div>
+    <div class="filters">
+      <input class="filter-input" id="shelfSearch" placeholder="Артикул / товар / бренд..." oninput="shelfFilter()">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="shelfSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="shelfSort('nm_id')">АРТ WB ↕</th>
+          <th onclick="shelfSort('vendor_code')">АРТ ПОСТАВЩИКА ↕</th>
+          <th onclick="shelfSort('product_name')">ТОВАР ↕</th>
+          <th onclick="shelfSort('open_count')">ПРОСМОТРЫ ↕</th>
+          <th onclick="shelfSort('cart_count')">В КОРЗИНУ ↕</th>
+          <th onclick="shelfSort('conv_add_to_cart')">КОНВ. КОРЗИНА ↕</th>
+          <th onclick="shelfSort('conv_cart_to_order')">КОНВ. ЗАКАЗ ↕</th>
+          <th onclick="shelfSort('order_count')">ЗАКАЗЫ ↕</th>
+          <th onclick="shelfSort('order_sum')">ВЫРУЧКА ↕</th>
+          <th onclick="shelfSort('buyout_count')">ВЫКУПЛЕНО ↕</th>
+          <th onclick="shelfSort('conv_buyout')">ВЫКУП % ↕</th>
+          <th onclick="shelfSort('stocks_wb')">ОСТАТКИ ↕</th>
+        </tr></thead>
+        <tbody id="shelfBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="shelfPagination"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let data = [], filtered = [], page = 1;
+  const PER = 50;
+  let sortCol = 'order_sum', sortDir = -1;
+
+  async function shelfLoad() {
+    document.getElementById('shelfBody').innerHTML = '';
+    try {
+      const res = await fetch(`/api/dashboard/shelf?days_back=${WB.period}`);
+      data = await res.json();
+    } catch(e) { data = []; }
+    shelfFilter();
+    renderMetrics();
+  }
+  window.shelfLoad = shelfLoad;
+
+  function shelfFilter() {
+    const search = (document.getElementById('shelfSearch')?.value || '').toLowerCase();
+    filtered = data.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (search && !`${r.vendor_code||''} ${r.product_name||''} ${r.brand_name||''} ${r.nm_id||''}`.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortData();
+  }
+  window.shelfFilter = shelfFilter;
+
+  function shelfSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+    sortData();
+  }
+  window.shelfSort = shelfSort;
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) va = 0; if (vb == null) vb = 0;
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    page = 1;
+    render();
+  }
+
+  function renderMetrics() {
+    const m = document.getElementById('shelfMetrics');
+    if (!m) return;
+    let tOpen=0, tCart=0, tOrders=0, tSum=0, tBuyout=0;
+    const d = WB.cabinet ? data.filter(r => r.cabinet_id === WB.cabinet) : data;
+    for (const r of d) {
+      tOpen += r.open_count || 0;
+      tCart += r.cart_count || 0;
+      tOrders += r.order_count || 0;
+      tSum += r.order_sum || 0;
+      tBuyout += r.buyout_count || 0;
+    }
+    const convCart = tOpen > 0 ? (tCart / tOpen * 100).toFixed(1) : 0;
+    const convOrder = tCart > 0 ? (tOrders / tCart * 100).toFixed(1) : 0;
+    const buyoutPct = tOrders > 0 ? (tBuyout / tOrders * 100).toFixed(1) : 0;
+    m.innerHTML = `
+      <div class="card metric-card orange"><div class="metric-label">ПРОСМОТРЫ</div><div class="metric-value">${fmt(tOpen)}</div></div>
+      <div class="card metric-card teal"><div class="metric-label">В КОРЗИНУ</div><div class="metric-value">${fmt(tCart)}</div><div class="metric-sub">${convCart}%</div></div>
+      <div class="card metric-card green"><div class="metric-label">ЗАКАЗЫ</div><div class="metric-value">${fmt(tOrders)}</div><div class="metric-sub">${convOrder}% от корзины</div></div>
+      <div class="card metric-card yellow"><div class="metric-label">ВЫРУЧКА</div><div class="metric-value">${fmtMoney(Math.round(tSum))}</div></div>
+      <div class="card metric-card"><div class="metric-label">ВЫКУП</div><div class="metric-value">${buyoutPct}%</div><div class="metric-sub">${fmt(tBuyout)} из ${fmt(tOrders)}</div></div>
+    `;
+  }
+
+  function render() {
+    const body = document.getElementById('shelfBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="13" style="text-align:center;color:var(--text3);padding:30px;">Нет данных</td></tr>`;
+      document.getElementById('shelfPagination').innerHTML = '';
+      return;
+    }
+    body.innerHTML = slice.map(r => `<tr class="fade-in">
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td class="td-mono">${r.nm_id}</td>
+      <td>${r.vendor_code || '—'}</td>
+      <td>${r.product_name || '—'}</td>
+      <td class="td-mono">${fmt(r.open_count)}</td>
+      <td class="td-mono" style="color:var(--accent3)">${fmt(r.cart_count)}</td>
+      <td class="td-mono">${r.conv_add_to_cart}%</td>
+      <td class="td-mono">${r.conv_cart_to_order}%</td>
+      <td class="td-mono" style="color:var(--accent2)">${fmt(r.order_count)}</td>
+      <td class="td-mono" style="color:var(--green)">${fmtMoney(Math.round(r.order_sum))}</td>
+      <td class="td-mono" style="color:var(--green)">${fmt(r.buyout_count)}</td>
+      <td class="td-mono" style="color:var(--accent)">${r.conv_buyout}%</td>
+      <td class="td-mono">${fmt(r.stocks_wb)}</td>
+    </tr>`).join('');
+    renderPagination('shelfPagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  window.addEventListener('wb:tab-activated:shelf', shelfLoad);
+  window.addEventListener('wb:cabinet-changed', () => { if (data.length) { shelfFilter(); renderMetrics(); } });
+})();
+</script>

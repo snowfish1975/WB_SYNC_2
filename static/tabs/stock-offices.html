@@ -1,0 +1,121 @@
+<!-- ============================================================
+     TAB: ОСТАТКИ ПО СКЛАДАМ
+     ============================================================ -->
+<div id="stockOfficesTab">
+  <div class="summary-grid section-mb" id="stockOfficesMetrics"></div>
+
+  <div class="card">
+    <div class="section-title">Остатки по складам и регионам</div>
+    <div class="filters">
+      <input class="filter-input" id="soSearch" placeholder="Склад / регион / кабинет..." oninput="soFilter()">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="soSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="soSort('region_name')">РЕГИОН ↕</th>
+          <th onclick="soSort('office_name')">СКЛАД ↕</th>
+          <th onclick="soSort('stock_count')">ОСТАТКИ ШТ ↕</th>
+          <th onclick="soSort('stock_sum')">ОСТАТКИ СУММА ↕</th>
+          <th onclick="soSort('sale_rate_days')">ОБОРОТ ↕</th>
+          <th onclick="soSort('to_client_count')">К КЛИЕНТУ ↕</th>
+          <th onclick="soSort('from_client_count')">ОТ КЛИЕНТА ↕</th>
+        </tr></thead>
+        <tbody id="soBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="soPagination"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let data = [], filtered = [], page = 1;
+  const PER = 50;
+  let sortCol = 'stock_sum', sortDir = -1;
+
+  async function soLoad() {
+    document.getElementById('soBody').innerHTML = '';
+    try {
+      const res = await fetch(`/api/dashboard/stock-offices?days_back=${WB.period}`);
+      data = await res.json();
+    } catch(e) { data = []; }
+    soFilter();
+    renderMetrics();
+  }
+  window.soLoad = soLoad;
+
+  function soFilter() {
+    const search = (document.getElementById('soSearch')?.value || '').toLowerCase();
+    filtered = data.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (search && !`${r.office_name||''} ${r.region_name||''} ${r.seller_name||''}`.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortData();
+  }
+  window.soFilter = soFilter;
+
+  function soSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+    sortData();
+  }
+  window.soSort = soSort;
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) va = 0; if (vb == null) vb = 0;
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    page = 1;
+    render();
+  }
+
+  function renderMetrics() {
+    const m = document.getElementById('stockOfficesMetrics');
+    if (!m) return;
+    let totalCount=0, totalSum=0, totalToClient=0;
+    const d = WB.cabinet ? data.filter(r => r.cabinet_id === WB.cabinet) : data;
+    for (const r of d) {
+      totalCount += r.stock_count || 0;
+      totalSum += r.stock_sum || 0;
+      totalToClient += r.to_client_count || 0;
+    }
+    const uniqueRegions = new Set(d.map(r => r.region_name)).size;
+    const uniqueOffices = new Set(d.map(r => r.office_name)).size;
+    m.innerHTML = `
+      <div class="card metric-card orange"><div class="metric-label">ОСТАТКИ</div><div class="metric-value">${fmt(totalCount)}</div><div class="metric-sub">${fmtMoney(Math.round(totalSum))}</div></div>
+      <div class="card metric-card teal"><div class="metric-label">РЕГИОНЫ</div><div class="metric-value">${uniqueRegions}</div></div>
+      <div class="card metric-card green"><div class="metric-label">СКЛАДЫ</div><div class="metric-value">${uniqueOffices}</div></div>
+      <div class="card metric-card yellow"><div class="metric-label">В ПУТИ К КЛИЕНТУ</div><div class="metric-value">${fmt(totalToClient)}</div></div>
+    `;
+  }
+
+  function render() {
+    const body = document.getElementById('soBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:30px;">Нет данных</td></tr>`;
+      document.getElementById('soPagination').innerHTML = '';
+      return;
+    }
+    body.innerHTML = slice.map(r => `<tr class="fade-in">
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td>${r.region_name || '—'}</td>
+      <td>${r.office_name || '—'}</td>
+      <td class="td-mono">${fmt(r.stock_count)}</td>
+      <td class="td-mono" style="color:var(--green)">${fmtMoney(Math.round(r.stock_sum))}</td>
+      <td class="td-mono">${r.sale_rate_days} дн</td>
+      <td class="td-mono" style="color:var(--accent2)">${fmt(r.to_client_count)}</td>
+      <td class="td-mono" style="color:var(--accent)">${fmt(r.from_client_count)}</td>
+    </tr>`).join('');
+    renderPagination('soPagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  window.addEventListener('wb:tab-activated:stock-offices', soLoad);
+  window.addEventListener('wb:cabinet-changed', () => { if (data.length) { soFilter(); renderMetrics(); } });
+})();
+</script>

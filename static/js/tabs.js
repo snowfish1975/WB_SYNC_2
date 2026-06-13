@@ -8,8 +8,12 @@ const TAB_SRCS = {
   stocks:       '/static/tabs/stocks.html',
   top:          '/static/tabs/top-products.html',
   report:       '/static/tabs/sales-report.html',
+  shelf:        '/static/tabs/shelf.html',
+  funnel:       '/static/tabs/conversion.html',
   chars:        '/static/tabs/characteristics.html',
   abcxyz:       '/static/tabs/abc-xyz.html',
+  'stock-offices': '/static/tabs/stock-offices.html',
+  'item-ratings':  '/static/tabs/item-ratings.html',
 };
 
 const loadedTabs = new Set();
@@ -21,7 +25,7 @@ async function loadTab(name) {
 
   container.innerHTML = loaderHTML('Загрузка...');
   try {
-    const res = await fetch(TAB_SRCS[name]);
+    const res = await fetch(TAB_SRCS[name] + '?v=' + Date.now());
     const html = await res.text();
     container.innerHTML = html;
 

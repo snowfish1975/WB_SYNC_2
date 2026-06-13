@@ -25,9 +25,11 @@ from app.crud import (
     create_api_key, get_api_key_by_hash, list_api_keys, update_api_key_last_used, delete_api_key,
     create_wb_token, get_wb_token_by_hash, list_wb_tokens, update_wb_token, delete_wb_token,
     load_token_mapping,
+    get_shelf_metrics, get_funnel_metrics, get_stock_by_offices, get_item_ratings,
 )
 from app.models import User, ApiKey, WbToken
 from app.models import ProductCharacteristic, Stock, Order, Price, SalesReport, Sale
+from app.models import ShelfMetric, FunnelMetric, StockByOffice, ItemRating
 from app.scheduler import run_sync_all, run_sales_report_sync
 
 from fastapi.responses import JSONResponse
@@ -743,3 +745,189 @@ def dashboard_abc_xyz(
         "total_revenue": round(total_revenue, 2),
         "total_items": len(items),
     }
+
+
+# =====================
+# SHELF & FUNNEL ANALYTICS
+# =====================
+
+@app.get("/api/dashboard/shelf")
+def dashboard_shelf(
+    days_back: int = Query(30, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Витрина продаж: просмотры, конверсия, добавления в корзину, заказы."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+
+    rows = (
+        db.query(ShelfMetric)
+        .filter(ShelfMetric.period_end >= threshold)
+        .order_by(ShelfMetric.order_sum.desc())
+        .limit(10000)
+        .all()
+    )
+
+    result = []
+    for r in rows:
+        result.append({
+            "cabinet_id": r.cabinet_id,
+            "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8]),
+            "nm_id": r.nm_id,
+            "vendor_code": r.vendor_code or "",
+            "product_name": r.product_name or "",
+            "subject_name": r.subject_name or "",
+            "brand_name": r.brand_name or "",
+            "product_rating": r.product_rating,
+            "feedback_rating": r.feedback_rating,
+            "open_count": r.open_count,
+            "cart_count": r.cart_count,
+            "order_count": r.order_count,
+            "order_sum": r.order_sum,
+            "buyout_count": r.buyout_count,
+            "buyout_sum": r.buyout_sum,
+            "cancel_count": r.cancel_count,
+            "cancel_sum": r.cancel_sum,
+            "avg_price": r.avg_price,
+            "avg_orders_per_day": r.avg_orders_per_day,
+            "conv_add_to_cart": r.conv_add_to_cart,
+            "conv_cart_to_order": r.conv_cart_to_order,
+            "conv_buyout": r.conv_buyout,
+            "stocks_wb": r.stocks_wb,
+            "stocks_mp": r.stocks_mp,
+            "add_to_wishlist": r.add_to_wishlist,
+            "period_start": r.period_start.isoformat() if r.period_start else None,
+            "period_end": r.period_end.isoformat() if r.period_end else None,
+        })
+    return result
+
+
+@app.get("/api/dashboard/stock-offices")
+def dashboard_stock_offices(
+    days_back: int = Query(30, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Остатки по складам и регионам."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+
+    rows = (
+        db.query(StockByOffice)
+        .filter(StockByOffice.period_end >= threshold)
+        .order_by(StockByOffice.stock_sum.desc())
+        .limit(50000)
+        .all()
+    )
+
+    result = []
+    for r in rows:
+        result.append({
+            "cabinet_id": r.cabinet_id,
+            "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8]),
+            "region_name": r.region_name,
+            "office_id": r.office_id,
+            "office_name": r.office_name,
+            "stock_count": r.stock_count,
+            "stock_sum": r.stock_sum,
+            "sale_rate_days": r.sale_rate_days,
+            "to_client_count": r.to_client_count,
+            "from_client_count": r.from_client_count,
+            "period_start": r.period_start.isoformat() if r.period_start else None,
+            "period_end": r.period_end.isoformat() if r.period_end else None,
+        })
+    return result
+
+
+@app.get("/api/dashboard/item-ratings")
+def dashboard_item_ratings(
+    days_back: int = Query(30, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Оценки и отзывы товаров."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+
+    rows = (
+        db.query(ItemRating)
+        .filter(ItemRating.period_end >= threshold)
+        .order_by(ItemRating.feedback_count.desc())
+        .limit(50000)
+        .all()
+    )
+
+    result = []
+    for r in rows:
+        result.append({
+            "cabinet_id": r.cabinet_id,
+            "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8]),
+            "nm_id": r.nm_id,
+            "vendor_code": r.vendor_code or "",
+            "product_name": r.product_name or "",
+            "subject_name": r.subject_name or "",
+            "brand_name": r.brand_name or "",
+            "seller_rating": r.seller_rating,
+            "product_rating": r.product_rating,
+            "feedback_rating": r.feedback_rating,
+            "feedback_percentile": r.feedback_percentile,
+            "feedback_count": r.feedback_count,
+            "five_star": r.five_star,
+            "four_star": r.four_star,
+            "three_star": r.three_star,
+            "two_star": r.two_star,
+            "one_star": r.one_star,
+            "disqualified": r.disqualified,
+            "period_start": r.period_start.isoformat() if r.period_start else None,
+            "period_end": r.period_end.isoformat() if r.period_end else None,
+        })
+    return result
+
+
+@app.get("/api/dashboard/funnel")
+def dashboard_funnel(
+    days_back: int = Query(30, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Воронка конверсии: сравнение периодов, динамика."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+
+    rows = (
+        db.query(FunnelMetric)
+        .filter(FunnelMetric.period_end >= threshold)
+        .order_by(FunnelMetric.order_sum.desc())
+        .limit(10000)
+        .all()
+    )
+
+    result = []
+    for r in rows:
+        result.append({
+            "cabinet_id": r.cabinet_id,
+            "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8]),
+            "nm_id": r.nm_id,
+            "vendor_code": r.vendor_code or "",
+            "product_name": r.product_name or "",
+            "subject_name": r.subject_name or "",
+            "brand_name": r.brand_name or "",
+            "open_count": r.open_count,
+            "cart_count": r.cart_count,
+            "order_count": r.order_count,
+            "order_sum": r.order_sum,
+            "buyout_count": r.buyout_count,
+            "conv_add_to_cart": r.conv_add_to_cart,
+            "conv_cart_to_order": r.conv_cart_to_order,
+            "conv_buyout": r.conv_buyout,
+            "past_open_count": r.past_open_count,
+            "past_cart_count": r.past_cart_count,
+            "past_order_count": r.past_order_count,
+            "past_order_sum": r.past_order_sum,
+            "past_buyout_count": r.past_buyout_count,
+            "past_conv_buyout": r.past_conv_buyout,
+            "dynamic_open": r.dynamic_open,
+            "dynamic_cart": r.dynamic_cart,
+            "dynamic_order": r.dynamic_order,
+            "dynamic_buyout": r.dynamic_buyout,
+            "period_start": r.period_start.isoformat() if r.period_start else None,
+            "period_end": r.period_end.isoformat() if r.period_end else None,
+        })
+    return result

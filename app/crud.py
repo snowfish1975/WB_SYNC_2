@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from app.models import ProductCharacteristic, SyncLog, Stock, Order, Price, SalesReport, Sale, User, ApiKey, WbToken
+from app.models import ProductCharacteristic, SyncLog, Stock, Order, Price, SalesReport, Sale, User, ApiKey, WbToken, ShelfMetric, FunnelMetric, StockByOffice, ItemRating
 from datetime import datetime, timedelta
 import os
 import hashlib
@@ -670,6 +670,245 @@ def load_token_mapping() -> dict[str, str]:
     mapping = get_token_mapping_from_db()
     if mapping:
         return mapping
+
+    # Fallback: загрузка из env var (для обратной совместимости)
+    raw = os.getenv("WB_TOKENS_JSON", "{}")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        data = {}
+
+    for name, token in data.items():
+        tid = hashlib.sha256(token.encode()).hexdigest()[:32]
+        mapping[tid] = name
+
+    return mapping
+
+
+# -------------------------
+# Shelf Metrics (Витрина продаж — sales-funnel v3)
+# -------------------------
+def clear_shelf_metrics(db: Session, cabinet_id: str):
+    db.query(ShelfMetric).filter(ShelfMetric.cabinet_id == cabinet_id).delete()
+    db.commit()
+
+
+def upsert_shelf_metric(db: Session, cabinet_id: str, item: dict, period_start: datetime, period_end: datetime):
+    product = item.get("product", {})
+    stats = item.get("statistic", {}).get("selected", {})
+    conv = stats.get("conversions", {})
+    stocks = product.get("stocks", {})
+
+    stmt = pg_insert(ShelfMetric).values(
+        cabinet_id=cabinet_id,
+        nm_id=product.get("nmId", 0),
+        vendor_code=product.get("vendorCode", ""),
+        product_name=product.get("title", ""),
+        subject_name=product.get("subjectName", ""),
+        brand_name=product.get("brandName", ""),
+        product_rating=product.get("productRating", 0),
+        feedback_rating=product.get("feedbackRating", 0),
+        period_start=period_start,
+        period_end=period_end,
+        open_count=stats.get("openCount", 0),
+        cart_count=stats.get("cartCount", 0),
+        order_count=stats.get("orderCount", 0),
+        order_sum=stats.get("orderSum", 0),
+        buyout_count=stats.get("buyoutCount", 0),
+        buyout_sum=stats.get("buyoutSum", 0),
+        cancel_count=stats.get("cancelCount", 0),
+        cancel_sum=stats.get("cancelSum", 0),
+        avg_price=stats.get("avgPrice", 0),
+        avg_orders_per_day=stats.get("avgOrdersCountPerDay", 0),
+        share_order_percent=stats.get("shareOrderPercent", 0),
+        add_to_wishlist=stats.get("addToWishlist", 0),
+        conv_add_to_cart=conv.get("addToCartPercent", 0),
+        conv_cart_to_order=conv.get("cartToOrderPercent", 0),
+        conv_buyout=conv.get("buyoutPercent", 0),
+        stocks_wb=stocks.get("wb", 0),
+        stocks_mp=stocks.get("mp", 0),
+        raw_data=item,
+    ).on_conflict_do_update(
+        constraint="uq_shelf_metric",
+        set_={
+            "open_count": pg_insert(ShelfMetric).excluded.open_count,
+            "cart_count": pg_insert(ShelfMetric).excluded.cart_count,
+            "order_count": pg_insert(ShelfMetric).excluded.order_count,
+            "order_sum": pg_insert(ShelfMetric).excluded.order_sum,
+            "buyout_count": pg_insert(ShelfMetric).excluded.buyout_count,
+            "buyout_sum": pg_insert(ShelfMetric).excluded.buyout_sum,
+            "cancel_count": pg_insert(ShelfMetric).excluded.cancel_count,
+            "cancel_sum": pg_insert(ShelfMetric).excluded.cancel_sum,
+            "conv_add_to_cart": pg_insert(ShelfMetric).excluded.conv_add_to_cart,
+            "conv_cart_to_order": pg_insert(ShelfMetric).excluded.conv_cart_to_order,
+            "conv_buyout": pg_insert(ShelfMetric).excluded.conv_buyout,
+            "stocks_wb": pg_insert(ShelfMetric).excluded.stocks_wb,
+            "raw_data": pg_insert(ShelfMetric).excluded.raw_data,
+            "synced_at": datetime.utcnow(),
+        },
+    )
+    db.execute(stmt)
+
+
+def get_shelf_metrics(db: Session, cabinet_id: str | None = None, days_back: int = 30):
+    threshold = datetime.now() - timedelta(days=days_back)
+    q = db.query(ShelfMetric).filter(ShelfMetric.period_end >= threshold)
+    if cabinet_id:
+        q = q.filter(ShelfMetric.cabinet_id == cabinet_id)
+    return q.order_by(ShelfMetric.order_sum.desc()).limit(50000).all()
+
+
+# -------------------------
+# Funnel Metrics (Воронка конверсии — sales-funnel v3)
+# -------------------------
+def clear_funnel_metrics(db: Session, cabinet_id: str):
+    db.query(FunnelMetric).filter(FunnelMetric.cabinet_id == cabinet_id).delete()
+    db.commit()
+
+
+def upsert_funnel_metric(db: Session, cabinet_id: str, item: dict, period_start: datetime, period_end: datetime):
+    product = item.get("product", {})
+    stats = item.get("statistic", {})
+    selected = stats.get("selected", {})
+    past = stats.get("past", {})
+    comparison = stats.get("comparison", {})
+    conv = selected.get("conversions", {})
+    past_conv = past.get("conversions", {})
+
+    stmt = pg_insert(FunnelMetric).values(
+        cabinet_id=cabinet_id,
+        nm_id=product.get("nmId", 0),
+        vendor_code=product.get("vendorCode", ""),
+        product_name=product.get("title", ""),
+        subject_name=product.get("subjectName", ""),
+        brand_name=product.get("brandName", ""),
+        period_start=period_start,
+        period_end=period_end,
+        open_count=selected.get("openCount", 0),
+        cart_count=selected.get("cartCount", 0),
+        order_count=selected.get("orderCount", 0),
+        order_sum=selected.get("orderSum", 0),
+        buyout_count=selected.get("buyoutCount", 0),
+        buyout_sum=selected.get("buyoutSum", 0),
+        conv_add_to_cart=conv.get("addToCartPercent", 0),
+        conv_cart_to_order=conv.get("cartToOrderPercent", 0),
+        conv_buyout=conv.get("buyoutPercent", 0),
+        past_open_count=past.get("openCount", 0),
+        past_cart_count=past.get("cartCount", 0),
+        past_order_count=past.get("orderCount", 0),
+        past_order_sum=past.get("orderSum", 0),
+        past_buyout_count=past.get("buyoutCount", 0),
+        past_conv_buyout=past_conv.get("buyoutPercent", 0),
+        dynamic_open=comparison.get("openCountDynamic", 0),
+        dynamic_cart=comparison.get("cartCountDynamic", 0),
+        dynamic_order=comparison.get("orderCountDynamic", 0),
+        dynamic_buyout=comparison.get("buyoutCountDynamic", 0),
+        raw_data=item,
+    ).on_conflict_do_update(
+        constraint="uq_funnel_metric",
+        set_={
+            "open_count": pg_insert(FunnelMetric).excluded.open_count,
+            "cart_count": pg_insert(FunnelMetric).excluded.cart_count,
+            "order_count": pg_insert(FunnelMetric).excluded.order_count,
+            "order_sum": pg_insert(FunnelMetric).excluded.order_sum,
+            "buyout_count": pg_insert(FunnelMetric).excluded.buyout_count,
+            "conv_add_to_cart": pg_insert(FunnelMetric).excluded.conv_add_to_cart,
+            "conv_cart_to_order": pg_insert(FunnelMetric).excluded.conv_cart_to_order,
+            "conv_buyout": pg_insert(FunnelMetric).excluded.conv_buyout,
+            "past_open_count": pg_insert(FunnelMetric).excluded.past_open_count,
+            "past_cart_count": pg_insert(FunnelMetric).excluded.past_cart_count,
+            "past_order_count": pg_insert(FunnelMetric).excluded.past_order_count,
+            "past_order_sum": pg_insert(FunnelMetric).excluded.past_order_sum,
+            "past_buyout_count": pg_insert(FunnelMetric).excluded.past_buyout_count,
+            "past_conv_buyout": pg_insert(FunnelMetric).excluded.past_conv_buyout,
+            "dynamic_open": pg_insert(FunnelMetric).excluded.dynamic_open,
+            "dynamic_cart": pg_insert(FunnelMetric).excluded.dynamic_cart,
+            "dynamic_order": pg_insert(FunnelMetric).excluded.dynamic_order,
+            "dynamic_buyout": pg_insert(FunnelMetric).excluded.dynamic_buyout,
+            "raw_data": pg_insert(FunnelMetric).excluded.raw_data,
+            "synced_at": datetime.utcnow(),
+        },
+    )
+    db.execute(stmt)
+
+
+def get_funnel_metrics(db: Session, cabinet_id: str | None = None, days_back: int = 30):
+    threshold = datetime.now() - timedelta(days=days_back)
+    q = db.query(FunnelMetric).filter(FunnelMetric.period_end >= threshold)
+    if cabinet_id:
+        q = q.filter(FunnelMetric.cabinet_id == cabinet_id)
+    return q.order_by(FunnelMetric.order_sum.desc()).limit(50000).all()
+
+
+# -------------------------
+# Stock By Office (Остатки по offices)
+# -------------------------
+def clear_stock_by_offices(db: Session, cabinet_id: str):
+    db.query(StockByOffice).filter(StockByOffice.cabinet_id == cabinet_id).delete()
+    db.commit()
+
+def upsert_stock_by_office(db: Session, cabinet_id: str, region: dict, office: dict, period_start: datetime, period_end: datetime):
+    m = office.get("metrics", {})
+    sr = m.get("saleRate", {})
+    stmt = pg_insert(StockByOffice).values(
+        cabinet_id=cabinet_id,
+        region_name=region.get("regionName", ""),
+        office_id=office.get("officeID", 0),
+        office_name=office.get("officeName", ""),
+        period_start=period_start, period_end=period_end,
+        stock_count=m.get("stockCount", 0), stock_sum=m.get("stockSum", 0),
+        sale_rate_days=sr.get("days", 0) if isinstance(sr, dict) else 0,
+        to_client_count=m.get("toClientCount", 0), from_client_count=m.get("fromClientCount", 0),
+        raw_data={"region": region.get("regionName"), "office": office},
+    ).on_conflict_do_update(
+        constraint="uq_stock_office",
+        set_={"stock_count": pg_insert(StockByOffice).excluded.stock_count, "stock_sum": pg_insert(StockByOffice).excluded.stock_sum, "sale_rate_days": pg_insert(StockByOffice).excluded.sale_rate_days, "to_client_count": pg_insert(StockByOffice).excluded.to_client_count, "from_client_count": pg_insert(StockByOffice).excluded.from_client_count, "raw_data": pg_insert(StockByOffice).excluded.raw_data, "synced_at": datetime.utcnow()},
+    )
+    db.execute(stmt)
+
+def get_stock_by_offices(db: Session, cabinet_id: str | None = None):
+    q = db.query(StockByOffice)
+    if cabinet_id:
+        q = q.filter(StockByOffice.cabinet_id == cabinet_id)
+    return q.order_by(StockByOffice.stock_sum.desc()).limit(50000).all()
+
+
+# -------------------------
+# Item Rating (Рейтинг товаров)
+# -------------------------
+def clear_item_ratings(db: Session, cabinet_id: str):
+    db.query(ItemRating).filter(ItemRating.cabinet_id == cabinet_id).delete()
+    db.commit()
+
+def upsert_item_rating(db: Session, cabinet_id: str, card: dict, seller_rating: float, period_start: datetime, period_end: datetime):
+    stmt = pg_insert(ItemRating).values(
+        cabinet_id=cabinet_id, nm_id=card.get("nmId", 0),
+        vendor_code=card.get("vendorCode", ""), product_name=card.get("title", ""),
+        subject_name=card.get("subjectName", ""), brand_name=card.get("brandName", ""),
+        period_start=period_start, period_end=period_end,
+        seller_rating=seller_rating,
+        product_rating=card.get("rating", 0),
+        feedback_rating=card.get("feedbackRating", {}).get("current", 0),
+        feedback_percentile=card.get("feedbackRating", {}).get("percentile", 0),
+        feedback_count=card.get("feedbackCount", {}).get("current", 0),
+        five_star=card.get("fiveStar", {}).get("current", 0),
+        four_star=card.get("fourStar", {}).get("current", 0),
+        three_star=card.get("threeStar", {}).get("current", 0),
+        two_star=card.get("twoStar", {}).get("current", 0),
+        one_star=card.get("oneStar", {}).get("current", 0),
+        disqualified=card.get("disqualified", 0),
+        raw_data=card,
+    ).on_conflict_do_update(
+        constraint="uq_item_rating",
+        set_={"feedback_rating": pg_insert(ItemRating).excluded.feedback_rating, "feedback_count": pg_insert(ItemRating).excluded.feedback_count, "five_star": pg_insert(ItemRating).excluded.five_star, "four_star": pg_insert(ItemRating).excluded.four_star, "three_star": pg_insert(ItemRating).excluded.three_star, "two_star": pg_insert(ItemRating).excluded.two_star, "one_star": pg_insert(ItemRating).excluded.one_star, "seller_rating": pg_insert(ItemRating).excluded.seller_rating, "raw_data": pg_insert(ItemRating).excluded.raw_data, "synced_at": datetime.utcnow()},
+    )
+    db.execute(stmt)
+
+def get_item_ratings(db: Session, cabinet_id: str | None = None):
+    q = db.query(ItemRating)
+    if cabinet_id:
+        q = q.filter(ItemRating.cabinet_id == cabinet_id)
+    return q.order_by(ItemRating.feedback_count.desc()).limit(50000).all()
 
     # Fallback: загрузка из env var (для обратной совместимости)
     raw = os.getenv("WB_TOKENS_JSON", "{}")

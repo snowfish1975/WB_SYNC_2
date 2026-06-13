@@ -327,3 +327,145 @@ class WbToken(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship("User", back_populates="wb_tokens")
+
+
+# =====================
+# ANALYTICS (sales-funnel v3)
+# =====================
+
+
+class ShelfMetric(Base):
+    """Витрина продаж: просмотры, конверсия, добавления в корзину, заказы, выкупы."""
+    __tablename__ = "shelf_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    nm_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    vendor_code: Mapped[str] = mapped_column(String(200), nullable=True)
+    product_name: Mapped[str] = mapped_column(String(500), nullable=True)
+    subject_name: Mapped[str] = mapped_column(String(200), nullable=True)
+    brand_name: Mapped[str] = mapped_column(String(200), nullable=True)
+    product_rating: Mapped[float] = mapped_column(Float, default=0)
+    feedback_rating: Mapped[float] = mapped_column(Float, default=0)
+
+    period_start: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    period_end: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    open_count: Mapped[int] = mapped_column(Integer, default=0)
+    cart_count: Mapped[int] = mapped_column(Integer, default=0)
+    order_count: Mapped[int] = mapped_column(Integer, default=0)
+    order_sum: Mapped[int] = mapped_column(Integer, default=0)
+    buyout_count: Mapped[int] = mapped_column(Integer, default=0)
+    buyout_sum: Mapped[int] = mapped_column(Integer, default=0)
+    cancel_count: Mapped[int] = mapped_column(Integer, default=0)
+    cancel_sum: Mapped[int] = mapped_column(Integer, default=0)
+    avg_price: Mapped[int] = mapped_column(Integer, default=0)
+    avg_orders_per_day: Mapped[float] = mapped_column(Float, default=0)
+    share_order_percent: Mapped[float] = mapped_column(Float, default=0)
+    add_to_wishlist: Mapped[int] = mapped_column(Integer, default=0)
+
+    conv_add_to_cart: Mapped[int] = mapped_column(Integer, default=0)
+    conv_cart_to_order: Mapped[int] = mapped_column(Integer, default=0)
+    conv_buyout: Mapped[int] = mapped_column(Integer, default=0)
+
+    stocks_wb: Mapped[int] = mapped_column(Integer, default=0)
+    stocks_mp: Mapped[int] = mapped_column(Integer, default=0)
+
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("cabinet_id", "nm_id", "period_start", "period_end", name="uq_shelf_metric"),
+    )
+
+
+class FunnelMetric(Base):
+    """Воронка конверсии: сравнение текущего и прошлого периодов, динамика."""
+    __tablename__ = "funnel_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    nm_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    vendor_code: Mapped[str] = mapped_column(String(200), nullable=True)
+    product_name: Mapped[str] = mapped_column(String(500), nullable=True)
+    subject_name: Mapped[str] = mapped_column(String(200), nullable=True)
+    brand_name: Mapped[str] = mapped_column(String(200), nullable=True)
+
+    period_start: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    period_end: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    open_count: Mapped[int] = mapped_column(Integer, default=0)
+    cart_count: Mapped[int] = mapped_column(Integer, default=0)
+    order_count: Mapped[int] = mapped_column(Integer, default=0)
+    order_sum: Mapped[int] = mapped_column(Integer, default=0)
+    buyout_count: Mapped[int] = mapped_column(Integer, default=0)
+    buyout_sum: Mapped[int] = mapped_column(Integer, default=0)
+
+    conv_add_to_cart: Mapped[int] = mapped_column(Integer, default=0)
+    conv_cart_to_order: Mapped[int] = mapped_column(Integer, default=0)
+    conv_buyout: Mapped[int] = mapped_column(Integer, default=0)
+
+    past_open_count: Mapped[int] = mapped_column(Integer, default=0)
+    past_cart_count: Mapped[int] = mapped_column(Integer, default=0)
+    past_order_count: Mapped[int] = mapped_column(Integer, default=0)
+    past_order_sum: Mapped[int] = mapped_column(Integer, default=0)
+    past_buyout_count: Mapped[int] = mapped_column(Integer, default=0)
+    past_conv_buyout: Mapped[int] = mapped_column(Integer, default=0)
+
+    dynamic_open: Mapped[int] = mapped_column(Integer, default=0)
+    dynamic_cart: Mapped[int] = mapped_column(Integer, default=0)
+    dynamic_order: Mapped[int] = mapped_column(Integer, default=0)
+    dynamic_buyout: Mapped[int] = mapped_column(Integer, default=0)
+
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("cabinet_id", "nm_id", "period_start", "period_end", name="uq_funnel_metric"),
+    )
+
+
+class StockByOffice(Base):
+    __tablename__ = "stock_by_offices"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    region_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    office_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    office_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    period_start: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    period_end: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    stock_count: Mapped[int] = mapped_column(Integer, default=0)
+    stock_sum: Mapped[int] = mapped_column(Integer, default=0)
+    sale_rate_days: Mapped[int] = mapped_column(Integer, default=0)
+    to_client_count: Mapped[int] = mapped_column(Integer, default=0)
+    from_client_count: Mapped[int] = mapped_column(Integer, default=0)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+    __table_args__ = (UniqueConstraint("cabinet_id", "office_id", "period_start", "period_end", name="uq_stock_office"),)
+
+
+class ItemRating(Base):
+    __tablename__ = "item_ratings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    nm_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    vendor_code: Mapped[str] = mapped_column(String(200), nullable=True)
+    product_name: Mapped[str] = mapped_column(String(500), nullable=True)
+    subject_name: Mapped[str] = mapped_column(String(200), nullable=True)
+    brand_name: Mapped[str] = mapped_column(String(200), nullable=True)
+    period_start: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    period_end: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    seller_rating: Mapped[float] = mapped_column(Float, default=0)
+    product_rating: Mapped[float] = mapped_column(Float, default=0)
+    feedback_rating: Mapped[float] = mapped_column(Float, default=0)
+    feedback_percentile: Mapped[float] = mapped_column(Float, nullable=True, default=0)
+    feedback_count: Mapped[int] = mapped_column(Integer, default=0)
+    five_star: Mapped[int] = mapped_column(Integer, default=0)
+    four_star: Mapped[int] = mapped_column(Integer, default=0)
+    three_star: Mapped[int] = mapped_column(Integer, default=0)
+    two_star: Mapped[int] = mapped_column(Integer, default=0)
+    one_star: Mapped[int] = mapped_column(Integer, default=0)
+    disqualified: Mapped[int] = mapped_column(Integer, default=0)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+    __table_args__ = (UniqueConstraint("cabinet_id", "nm_id", "period_start", "period_end", name="uq_item_rating"),)
