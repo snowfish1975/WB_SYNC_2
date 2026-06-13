@@ -1,32 +1,38 @@
 # WB Sync
 
-Сервис синхронизации данных Wildberries.
+Сервис синхронизации данных Wildberries с дашбордом аналитики.
 
-Приложение регулярно загружает данные из API Wildberries (характеристики товаров, остатки, заказы, цены, продажи, отчёт реализации), сохраняет их в PostgreSQL и предоставляет доступ через REST API и дашборд.
+Загружает данные из API Wildberries (характеристики, остатки, заказы, цены, продажи, аналитику), сохраняет в PostgreSQL и предоставляет REST API + дашборд.
 
 ---
 
 ## Возможности
 
-- Поддержка нескольких кабинетов продавцов
+- Поддержка нескольких кабинетов продавцов (19 кабинетов)
 - Привязка токенов к человекочитаемым именам продавцов
-- Ежедневная автоматическая синхронизация (cron)
+- Автоматическая ежедневная синхронизация по расписанию
 - Ручной запуск синхронизации через API
-- Хранение истории синхронизаций (логов)
-- Получение данных через REST API
-- Встроенный дашборд с аналитикой
-- Отправка отчётов в Telegram
+- Telegram-уведомления о результатах синхронизации
+- Встроенный дашборд с 11 вкладками аналитики
+- Raw data API для внешних потребителей
 
 ---
 
 ## Что синхронизируется
 
-- Характеристики товаров (cards/list)
-- Остатки на складах (stocks)
-- Заказы за последние 40 дней (orders)
-- Цены и скидки (prices)
-- Продажи и возвраты за последние 40 дней (sales)
-- Отчёт реализации за вчера (reportDetailByPeriod)
+### Основные данные
+- Характеристики товаров (content-api)
+- Остатки на складах WB (analytics-api)
+- Заказы за 40 дней (statistics-api)
+- Цены и скидки (prices-api)
+- Продажи за 40 дней (statistics-api)
+- Отчёт реализации за вчера (statistics-api)
+
+### Аналитика (analytics-api)
+- **Воронка продаж v3** — просмотры, конверсия в корзину/заказ, выкупы, сравнение с прошлым периодом
+- **Витрина продаж** — просмотры, добавления в корзину, конверсия по товарам
+- **Остатки по складам** — остатки и оборачиваемость по регионам и складам
+- **Оценки товаров** — рейтинг, отзывы по звёздам, перцентиль
 
 ---
 
@@ -36,44 +42,72 @@
 WB API → scheduler → PostgreSQL → FastAPI → клиент / дашборд
 ```
 
-- `main.py` — API-эндпоинты и дашборд
-- `scheduler.py` — синхронизация и Telegram-отчёты
-- `crud.py` — работа с БД (upsert, запросы, очистка)
-- `wb_client.py` — запросы к API Wildberries
-- `models.py` — SQLAlchemy модели
-- `schemas.py` — Pydantic-схемы ответов
-- `database.py` — подключение к PostgreSQL
+### Структура проекта
+
+```
+app/
+├── main.py               — FastAPI: эндпоинты, дашборд, лайфспан
+├── scheduler.py           — Планировщик: синхронизация + Telegram
+├── crud.py                — CRUD-операции с БД
+├── wb_client.py           — Клиент WB API (характеристики, остатки, заказы, цены, продажи)
+├── wb_analytics_client.py — Клиент WB Analytics API (воронка, склады, оценки)
+├── models.py              — SQLAlchemy модели
+├── schemas.py             — Pydantic-схемы
+└── database.py            — Подключение к PostgreSQL
+
+static/
+├── dashboard.html         — Оболочка дашборда
+├── tabs/
+│   ├── summary.html       — Сводка
+│   ├── orders.html        — Заказы
+│   ├── stocks.html        — Остатки
+│   ├── top-products.html  — Топ товаров
+│   ├── sales-report.html  — Отчёт реализации
+│   ├── shelf.html         — Витрина продаж
+│   ├── conversion.html    — Воронка конверсии
+│   ├── stock-offices.html — Остатки по складам
+│   ├── item-ratings.html  — Оценки и отзывы
+│   ├── characteristics.html — Характеристики
+│   └── abc-xyz.html       — ABC/XYZ анализ
+├── js/
+│   ├── core.js            — Глобальное состояние, фильтры, утилиты
+│   └── tabs.js            — Логика вкладок и динамическая загрузка
+├── base.css               — Стили
+└── themes.css             — Темы оформления
+
+alembic/
+└── versions/              — Миграции БД
+```
 
 ---
 
 ## Технологии
 
-- Python 3.11
-- FastAPI
+- Python 3.12
+- FastAPI + Uvicorn
 - SQLAlchemy 2.0
-- PostgreSQL
+- PostgreSQL 14+
 - APScheduler
-- httpx
+- httpx (async HTTP)
 - Pydantic 2.x
-- Render.com (деплой)
+- Alembic (миграции)
 
 ---
 
-## Локальный запуск
+## Установка и запуск
 
-### 1. Клонировать репозиторий
+### 1. Клонировать
 
 ```bash
-git clone https://github.com/ВАШ_ЛОГИН/wb-sync.git
-cd wb-sync
+git clone https://github.com/Snowfish1975/WB_SYNC_2.git
+cd WB_SYNC_2
 ```
 
 ### 2. Виртуальное окружение
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate   # Linux / macOS
-.venv\Scripts\activate      # Windows
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -83,175 +117,127 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-### Пример:
-
 ```env
-DATABASE_URL=postgresql://user:password@localhost/wb_sync
-
-WB_TOKENS_JSON={"ИП Иванов":"token1","ООО Ромашка":"token2"}
-
+DATABASE_URL=postgresql://user:password@localhost:5432/wbdb
 SYNC_HOUR=3
-
 TELEGRAM_BOT_TOKEN=xxx
 TELEGRAM_CHAT_ID=123456
 ```
 
----
-
-## Работа с токенами
-
-Формат переменной окружения:
-
-```env
-WB_TOKENS_JSON={"Имя продавца":"API_TOKEN"}
-```
-
-### Пример:
-
-```env
-WB_TOKENS_JSON={
-  "ИП Иванов":"abcdef123...",
-  "ООО Ромашка":"987654..."
-}
-```
-
-### Преимущества:
-
-- Не нужно соблюдать порядок токенов
-- Легко добавлять/удалять
-- Удобно читать и редактировать
-- Сразу есть имя продавца для логов и API
-
----
-
-## Запуск
+### 4. Инициализация БД
 
 ```bash
-uvicorn app.main:app --reload
+alembic upgrade head
 ```
 
-Swagger: `http://localhost:8000/docs`
+### 5. Токены продавцов
 
-Дашборд: `http://localhost:8000/dashboard`
+Токены WB добавляются через API или напрямую в таблицу `wb_tokens`.
+
+### 6. Запуск
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+- Дашборд: `http://localhost:8000/dashboard`
+- Swagger: `http://localhost:8000/docs`
+- Health-check: `http://localhost:8000/api/health`
 
 ---
 
 ## API
 
-Все эндпоинты с токеном принимают JSON-тело:
+### Данные (POST, raw data)
 
-```json
-{
-  "token": "API_TOKEN"
-}
-```
+| Эндпоинт | Описание |
+|----------|----------|
+| `/api/products` | Характеристики товаров |
+| `/api/stocks` | Остатки на складах |
+| `/api/orders` | Заказы (days_back, limit, offset, fields) |
+| `/api/sales` | Продажи и возвраты |
+| `/api/prices` | Цены и скидки |
+| `/api/sales-report` | Отчёт реализации |
 
-`seller_name` подставляется автоматически из `.env`.
+### Аналитика дашборда (GET)
 
-### Данные
-
-| Метод | Эндпоинт | Описание |
-|-------|----------|----------|
-| POST | `/api/products` | Характеристики товаров |
-| POST | `/api/stocks` | Остатки на складах |
-| POST | `/api/orders` | Заказы (days_back, limit, offset, fields) |
-| POST | `/api/sales` | Продажи и возвраты (days_back, limit, offset, fields) |
-| POST | `/api/prices` | Цены и скидки |
-| POST | `/api/sales-report` | Отчёт реализации (date_from, date_to, nm_id, limit) |
+| Эндпоинт | Описание |
+|----------|----------|
+| `/api/dashboard/summary` | Сводные цифры |
+| `/api/dashboard/sales-chart` | Продажи по дням |
+| `/api/dashboard/top-products` | Топ товаров по выручке |
+| `/api/dashboard/stocks-summary` | Остатки по товарам |
+| `/api/dashboard/sales-report-summary` | Сводка отчёта реализации |
+| `/api/dashboard/orders-raw` | Заказы для таблицы |
+| `/api/dashboard/shelf` | Витрина продаж (просмотры, конверсия) |
+| `/api/dashboard/funnel` | Воронка конверсии (сравнение периодов) |
+| `/api/dashboard/stock-offices` | Остатки по складам/регионам |
+| `/api/dashboard/item-ratings` | Оценки и отзывы товаров |
+| `/api/dashboard/abc-xyz` | ABC/XYZ анализ |
+| `/api/dashboard/characteristics` | Характеристики товаров |
+| `/api/dashboard/cabinets` | Список кабинетов |
 
 ### Управление
 
 | Метод | Эндпоинт | Описание |
 |-------|----------|----------|
 | POST | `/api/sync/trigger` | Запуск полной синхронизации |
-| POST | `/api/sync/trigger-sales-report` | Запуск синхронизации отчёта реализации |
+| POST | `/api/sync/trigger-sales-report` | Синхронизация отчёта реализации |
 | GET | `/api/logs` | История синхронизаций |
 | GET | `/api/health` | Health-check |
+| GET | `/dashboard` | HTML-дашборд |
 
-### Дашборд
+### Токены / Кабинеты
 
 | Метод | Эндпоинт | Описание |
 |-------|----------|----------|
-| GET | `/api/dashboard/summary` | Сводные цифры: заказы, выручка, отмены |
-| GET | `/api/dashboard/sales-chart` | Продажи по дням для графика |
-| GET | `/api/dashboard/top-products` | Топ товаров по выручке |
-| GET | `/api/dashboard/stocks-summary` | Остатки сгруппированные по товару |
-| GET | `/api/dashboard/sales-report-summary` | Сводка по отчёту реализации |
-| GET | `/api/dashboard/orders-raw` | Сырые заказы для таблицы |
-| GET | `/dashboard` | HTML-дашборд |
-
-### Параметры запросов (orders / sales)
-
-- `days_back` — за сколько дней вернуть данные (1-90, по умолчанию 40)
-- `limit` — максимальное количество записей (до 500000)
-- `offset` — смещение для пагинации
-- `fields` — поля через запятую (например: `nm_id,date,total_price`)
+| GET | `/api/wb-tokens` | Список токенов |
+| POST | `/api/wb-tokens` | Создать токен |
+| DELETE | `/api/wb-tokens/{id}` | Удалить токен |
 
 ---
 
 ## Планировщик
 
-Два фоновых задания через APScheduler:
-
-1. **Полная синхронизация** — ежедневно в `SYNC_HOUR` UTC (по умолчанию 03:00)
+1. **Основная синхронизация** — ежедневно в `SYNC_HOUR` UTC (по умолчанию 03:00 = 06:00 МСК)
+   - Характеристики, остатки, заказы, цены, продажи
+   - Воронка продаж v3 (просмотры, конверсия, выкупы)
+   - Остатки по складам (регионы, склады)
+   - Оценки товаров (рейтинги, отзывы)
 2. **Отчёт реализации** — ежедневно в 07:30 UTC (10:30 МСК)
 
+Лимиты WB Analytics API: 3 запроса в минуту, интервал 20 сек.
+
 ---
 
-## Telegram уведомления
+## Telegram-уведомления
 
-После каждой синхронизации отправляется отчёт:
-
-- Количество обработанных записей по каждому кабинету
+После каждой синхронизации в Telegram отправляется отчёт:
+- Количество записей по каждому кабинету
 - Ошибки по кабинетам
-- Общее время выполнения
+- Время выполнения
 
 ---
 
-## Особенности реализации
+## Особенности
 
 - Upsert через `ON CONFLICT` для идемпотентной записи
-- Потоковая загрузка заказов и продаж (чанками по 5000) для экономии памяти
+- Потоковая загрузка заказов и продаж (чанками по 5000)
 - Ретраи с backoff при ошибках API Wildberries
-- Токены не хранятся в БД — используется `token → SHA256 → cabinet_id`
+- Токены хранятся в БД с SHA-256 хэшем (`token_hash` = `cabinet_id`)
 - Автоочистка заказов и продаж старше 40 дней
+- Кэш-бастинг статических файлов
+- raw_data JSON-хранилище для полных ответов API
 
 ---
 
-## Важные замечания
+## WB API группы
 
-### Токены в БД не хранятся
-
-```
-token → SHA256 → cabinet_id
-```
-
-### Если JSON сломан — токены не загрузятся
-
-Проверьте валидность:
-
-```bash
-python -m json.tool < .env
-```
-
----
-
-## Деплой (Render)
-
-- Создать Web Service
-- Указать стартовую команду:
-
-```
-uvicorn app.main:app --host 0.0.0.0 --port 10000
-```
-
-- Добавить переменные окружения
-
----
-
-## Планы развития
-
-- Пагинация API для больших объёмов данных
-- Фильтрация по seller_name на уровне API
-- Аутентификация API-запросов
-- Миграции через Alembic
+| API | Домен | Данные |
+|-----|-------|--------|
+| Content API | `content-api.wildberries.ru` | Характеристики товаров |
+| Analytics API v1 | `seller-analytics-api.wildberries.ru` | Остатки на складах, оценки товаров |
+| Analytics API v3 | `seller-analytics-api.wildberries.ru` | Воронка продаж |
+| Analytics API v2 | `seller-analytics-api.wildberries.ru` | Остатки по группам/складам |
+| Statistics API | `statistics-api.wildberries.ru` | Заказы, продажи |
+| Prices API | `discounts-prices-api.wildberries.ru` | Цены и скидки |
