@@ -626,3 +626,120 @@ def api_delete_wb_token(token_id: int, db: Session = Depends(get_db)):
     if not success:
         return JSONResponse(status_code=404, content={"error": "Token not found"})
     return {"status": "deleted"}
+
+
+@app.get("/api/dashboard/abc-xyz")
+def dashboard_abc_xyz(
+    cabinet_id: str | None = Query(None),
+    days_back: int = Query(40, ge=7, le=90),
+    db: Session = Depends(get_db),
+):
+    """ABC/XYZ анализ по товарам."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+
+    q = (
+        db.query(
+            Order.cabinet_id,
+            Order.nm_id,
+            Order.supplier_article,
+            Order.subject,
+            Order.brand,
+            func.count(Order.id).label("orders_count"),
+            func.sum(case((Order.is_cancel == False, Order.price_with_disc), else_=0)).label("revenue"),
+        )
+        .filter(Order.date >= threshold, Order.nm_id.isnot(None), Order.is_cancel == False)
+        .group_by(Order.cabinet_id, Order.nm_id, Order.supplier_article, Order.subject, Order.brand)
+    )
+    if cabinet_id:
+        q = q.filter(Order.cabinet_id == cabinet_id)
+
+    rows = q.all()
+
+    from sqlalchemy import cast, Date
+    day_q = (
+        db.query(
+            Order.cabinet_id,
+            Order.nm_id,
+            cast(Order.date, Date).label("day"),
+            func.count(Order.id).label("day_count"),
+        )
+        .filter(Order.date >= threshold, Order.nm_id.isnot(None), Order.is_cancel == False)
+        .group_by(Order.cabinet_id, Order.nm_id, cast(Order.date, Date))
+    )
+    if cabinet_id:
+        day_q = day_q.filter(Order.cabinet_id == cabinet_id)
+
+    day_rows = day_q.all()
+
+    daily = {}
+    for dr in day_rows:
+        key = (dr.cabinet_id, dr.nm_id)
+        if key not in daily:
+            daily[key] = []
+        daily[key].append(dr.day_count)
+
+    total_revenue = sum(float(r.revenue or 0) for r in rows)
+    if total_revenue == 0:
+        return {"items": [], "matrix": {}, "total_revenue": 0, "total_items": 0}
+
+    items = []
+    for r in rows:
+        rev = float(r.revenue or 0)
+        key = (r.cabinet_id, r.nm_id)
+        day_counts = daily.get(key, [])
+        avg_daily = sum(day_counts) / max(len(day_counts), 1)
+        variance = sum((x - avg_daily) ** 2 for x in day_counts) / max(len(day_counts), 1) if day_counts else 0
+        std_dev = variance ** 0.5
+        cv = (std_dev / avg_daily * 100) if avg_daily > 0 else 999
+
+        items.append({
+            "cabinet_id": r.cabinet_id,
+            "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8]),
+            "nm_id": r.nm_id,
+            "supplier_article": r.supplier_article or "",
+            "subject": r.subject or "",
+            "brand": r.brand or "",
+            "revenue": round(rev, 2),
+            "orders_count": r.orders_count or 0,
+            "days_with_orders": len(day_counts),
+            "avg_daily": round(avg_daily, 2),
+            "cv": round(cv, 1),
+        })
+
+    items.sort(key=lambda x: x["revenue"], reverse=True)
+    cumulative = 0
+    for item in items:
+        cumulative += item["revenue"]
+        pct = cumulative / total_revenue * 100
+        if pct <= 80:
+            item["abc"] = "A"
+        elif pct <= 95:
+            item["abc"] = "B"
+        else:
+            item["abc"] = "C"
+
+    for item in items:
+        cv = item["cv"]
+        if cv <= 50:
+            item["xyz"] = "X"
+        elif cv <= 100:
+            item["xyz"] = "Y"
+        else:
+            item["xyz"] = "Z"
+
+    matrix = {}
+    for abc in ["A", "B", "C"]:
+        matrix[abc] = {"X": 0, "Y": 0, "Z": 0, "revenue": 0, "count": 0}
+    for item in items:
+        abc, xyz = item["abc"], item["xyz"]
+        matrix[abc][xyz] += 1
+        matrix[abc]["revenue"] += item["revenue"]
+        matrix[abc]["count"] += 1
+
+    return {
+        "items": items,
+        "matrix": matrix,
+        "total_revenue": round(total_revenue, 2),
+        "total_items": len(items),
+    }

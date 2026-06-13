@@ -9,6 +9,7 @@ const TAB_SRCS = {
   top:          '/static/tabs/top-products.html',
   report:       '/static/tabs/sales-report.html',
   chars:        '/static/tabs/characteristics.html',
+  abcxyz:       '/static/tabs/abc-xyz.html',
 };
 
 const loadedTabs = new Set();

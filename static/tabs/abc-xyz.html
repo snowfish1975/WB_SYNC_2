@@ -1,0 +1,311 @@
+<!-- ============================================================
+     TAB: ABC / XYZ АНАЛИЗ
+     ============================================================ -->
+<div id="abcxyzTab">
+  <!-- Сводные метрики -->
+  <div class="summary-grid section-mb" id="abcMetrics"></div>
+
+  <div class="two-col section-mb">
+    <!-- Матрица ABC/XYZ -->
+    <div class="card">
+      <div class="section-title">Матрица ABC × XYZ</div>
+      <div class="table-wrap" id="abcMatrixWrap"></div>
+    </div>
+    <!-- Диаграмма распределения -->
+    <div class="card">
+      <div class="section-title">Распределение ABC</div>
+      <div class="chart-container"><canvas id="abcPieChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Таблица товаров -->
+  <div class="card">
+    <div class="section-title">Детализация по товарам</div>
+    <div class="filters">
+      <input  class="filter-input" id="abcSearch" placeholder="Артикул / товар / бренд..." oninput="abcFilter()">
+      <select class="filter-select" id="abcClassFilter" onchange="abcFilter()">
+        <option value="">Все классы ABC</option>
+        <option value="A">A — ключевые</option>
+        <option value="B">B — средние</option>
+        <option value="C">C — долгие хвосты</option>
+      </select>
+      <select class="filter-select" id="abcDemandFilter" onchange="abcFilter()">
+        <option value="">Все классы XYZ</option>
+        <option value="X">X — стабильный спрос</option>
+        <option value="Y">Y — переменный спрос</option>
+        <option value="Z">Z — спорадический спрос</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="abcSort('abc')">ABC ↕</th>
+          <th onclick="abcSort('xyz')">XYZ ↕</th>
+          <th onclick="abcSort('nm_id')">АРТ WB ↕</th>
+          <th onclick="abcSort('supplier_article')">АРТ ↕</th>
+          <th onclick="abcSort('subject')">ТОВАР ↕</th>
+          <th onclick="abcSort('brand')">БРЕНД ↕</th>
+          <th onclick="abcSort('orders_count')">ЗАКАЗЫ ↕</th>
+          <th onclick="abcSort('revenue')">ВЫРУЧКА ↕</th>
+          <th onclick="abcSort('days_with_orders')">ДНЕЙ АКТИВЕН ↕</th>
+          <th onclick="abcSort('avg_daily')">СРДНЕВНО ↕</th>
+          <th onclick="abcSort('cv')">CV% ↕</th>
+        </tr></thead>
+        <tbody id="abcBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="abcPagination"></div>
+  </div>
+</div>
+
+<style>
+.abc-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px; height: 28px;
+  border-radius: 5px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+.abc-a { background: rgba(68,207,108,0.18); color: #44cf6c; }
+.abc-b { background: rgba(255,193,7,0.18);  color: #ffc107; }
+.abc-c { background: rgba(255,71,87,0.15);  color: #ff4757; }
+
+.xyz-x { background: rgba(78,205,196,0.15); color: #4ecdc4; }
+.xyz-y { background: rgba(168,85,247,0.15); color: #a855f7; }
+.xyz-z { background: rgba(255,107,53,0.15); color: #ff6b35; }
+
+.matrix-cell {
+  text-align: center;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 20px;
+  padding: 12px 8px;
+}
+.matrix-cell .cell-count { font-size: 14px; color: var(--text2); font-family: 'IBM Plex Mono', monospace; }
+.matrix-header {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text3);
+  text-align: center;
+  padding: 8px;
+}
+.matrix-row-label {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px;
+  padding: 12px 8px;
+}
+</style>
+
+<script>
+(function() {
+  let rawData = null, filtered = [], page = 1;
+  let sortCol = 'revenue', sortDir = -1;
+  const PER = 50;
+  let pieChart = null;
+
+  async function abcLoad() {
+    document.getElementById('abcBody').innerHTML = '';
+    const cab = WB.cabinet || '';
+    try {
+      const res = await fetch(`/api/dashboard/abc-xyz?days_back=${WB.period}&cabinet_id=${cab}`);
+      rawData = await res.json();
+    } catch(e) { rawData = { items: [], matrix: {}, total_revenue: 0, total_items: 0 }; }
+    abcFilter();
+  }
+  window.abcLoad = abcLoad;
+
+  function abcFilter() {
+    const search = (document.getElementById('abcSearch')?.value || '').toLowerCase();
+    const abcF = document.getElementById('abcClassFilter')?.value || '';
+    const xyzF = document.getElementById('abcDemandFilter')?.value || '';
+
+    filtered = (rawData?.items || []).filter(r => {
+      if (abcF && r.abc !== abcF) return false;
+      if (xyzF && r.xyz !== xyzF) return false;
+      if (search && !`${r.supplier_article||''} ${r.subject||''} ${r.brand||''} ${r.nm_id||''}`.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortData();
+    renderMetrics();
+    renderMatrix();
+    renderPie();
+  }
+  window.abcFilter = abcFilter;
+
+  function abcSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+    sortData();
+  }
+  window.abcSort = abcSort;
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) va = ''; if (vb == null) vb = '';
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    page = 1;
+    render();
+  }
+
+  function render() {
+    const body = document.getElementById('abcBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:30px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Нет данных</td></tr>`;
+      document.getElementById('abcPagination').innerHTML = '';
+      return;
+    }
+
+    body.innerHTML = slice.map(r => `<tr class="fade-in">
+      <td><span class="abc-badge abc-${r.abc.toLowerCase()}">${r.abc}</span></td>
+      <td><span class="abc-badge xyz-${r.xyz.toLowerCase()}">${r.xyz}</span></td>
+      <td class="td-mono">${r.nm_id || '—'}</td>
+      <td>${esc(r.supplier_article)}</td>
+      <td>${esc(r.subject)}</td>
+      <td>${esc(r.brand)}</td>
+      <td class="td-mono">${fmt(r.orders_count)}</td>
+      <td class="td-mono">${fmtMoney(r.revenue)}</td>
+      <td class="td-mono">${r.days_with_orders}</td>
+      <td class="td-mono">${r.avg_daily}</td>
+      <td class="td-mono">${r.cv}%</td>
+    </tr>`).join('');
+
+    renderPagination('abcPagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  function renderMetrics() {
+    const m = document.getElementById('abcMetrics');
+    if (!m || !rawData) return;
+    const items = rawData.items || [];
+    const aCount = items.filter(i => i.abc === 'A').length;
+    const aRev = items.filter(i => i.abc === 'A').reduce((s, i) => s + i.revenue, 0);
+    m.innerHTML = `
+      <div class="card metric-card orange">
+        <div class="metric-label">ТОВАРОВ</div>
+        <div class="metric-value">${fmt(rawData.total_items)}</div>
+      </div>
+      <div class="card metric-card teal">
+        <div class="metric-label">ВЫРУЧКА</div>
+        <div class="metric-value">${fmtMoney(rawData.total_revenue)}</div>
+      </div>
+      <div class="card metric-card green">
+        <div class="metric-label">ТОВАРОВ КЛАССА A</div>
+        <div class="metric-value">${aCount}</div>
+        <div class="metric-sub">${rawData.total_items ? Math.round(aCount / rawData.total_items * 100) : 0}% товаров</div>
+      </div>
+      <div class="card metric-card yellow">
+        <div class="metric-label">ВЫРУЧКА КЛАССА A</div>
+        <div class="metric-value">${fmtMoney(aRev)}</div>
+        <div class="metric-sub">${rawData.total_revenue ? Math.round(aRev / rawData.total_revenue * 100) : 0}% выручки</div>
+      </div>
+    `;
+  }
+
+  function renderMatrix() {
+    const wrap = document.getElementById('abcMatrixWrap');
+    if (!wrap || !rawData?.matrix) return;
+    const mx = rawData.matrix;
+    const total = rawData.total_items || 1;
+
+    let html = `<table>
+      <thead><tr>
+        <th class="matrix-header"></th>
+        <th class="matrix-header" style="color:#4ecdc4">X — стабильный</th>
+        <th class="matrix-header" style="color:#a855f7">Y — переменный</th>
+        <th class="matrix-header" style="color:#ff6b35">Z — спорадический</th>
+        <th class="matrix-header">ИТОГО</th>
+      </tr></thead><tbody>`;
+
+    for (const abc of ['A', 'B', 'C']) {
+      const row = mx[abc] || {};
+      const rowTotal = (row.X||0) + (row.Y||0) + (row.Z||0);
+      const rowRev = row.revenue || 0;
+      html += `<tr>
+        <td class="matrix-row-label abc-${abc.toLowerCase()}">${abc}</td>
+        <td class="matrix-cell"><span style="color:#4ecdc4">${row.X||0}</span><div class="cell-count">${fmtMoney(row.X ? Math.round(rowRev * (row.X/rowTotal)) : 0)}</div></td>
+        <td class="matrix-cell"><span style="color:#a855f7">${row.Y||0}</span><div class="cell-count">${fmtMoney(row.Y ? Math.round(rowRev * (row.Y/rowTotal)) : 0)}</div></td>
+        <td class="matrix-cell"><span style="color:#ff6b35">${row.Z||0}</span><div class="cell-count">${fmtMoney(row.Z ? Math.round(rowRev * (row.Z/rowTotal)) : 0)}</div></td>
+        <td class="matrix-cell" style="color:var(--text)">${rowTotal}<div class="cell-count">${fmtMoney(rowRev)}</div></td>
+      </tr>`;
+    }
+
+    // Итого
+    let gX=0, gY=0, gZ=0, gRev=0;
+    for (const abc of ['A','B','C']) {
+      const r = mx[abc] || {};
+      gX += r.X||0; gY += r.Y||0; gZ += r.Z||0; gRev += r.revenue||0;
+    }
+    html += `<tr style="border-top:2px solid var(--border)">
+      <td class="matrix-row-label" style="color:var(--text2)">ИТОГО</td>
+      <td class="matrix-cell" style="color:var(--text)">${gX}<div class="cell-count">${fmtMoney(gRev ? Math.round(gRev*gX/total) : 0)}</div></td>
+      <td class="matrix-cell" style="color:var(--text)">${gY}<div class="cell-count">${fmtMoney(gRev ? Math.round(gRev*gY/total) : 0)}</div></td>
+      <td class="matrix-cell" style="color:var(--text)">${gZ}<div class="cell-count">${fmtMoney(gRev ? Math.round(gRev*gZ/total) : 0)}</div></td>
+      <td class="matrix-cell" style="color:var(--text)">${gX+gY+gZ}<div class="cell-count">${fmtMoney(gRev)}</div></td>
+    </tr>`;
+
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  }
+
+  function renderPie() {
+    const canvas = document.getElementById('abcPieChart');
+    if (!canvas || !rawData?.items) return;
+    const items = rawData.items;
+
+    const revA = items.filter(i => i.abc === 'A').reduce((s, i) => s + i.revenue, 0);
+    const revB = items.filter(i => i.abc === 'B').reduce((s, i) => s + i.revenue, 0);
+    const revC = items.filter(i => i.abc === 'C').reduce((s, i) => s + i.revenue, 0);
+
+    if (pieChart) pieChart.destroy();
+    pieChart = new Chart(canvas, {
+      type: 'doughnut',
+      data: {
+        labels: ['A — ключевые', 'B — средние', 'C — долгие хвосты'],
+        datasets: [{
+          data: [revA, revB, revC],
+          backgroundColor: ['rgba(68,207,108,0.7)', 'rgba(255,193,7,0.7)', 'rgba(255,71,87,0.7)'],
+          borderColor: ['#44cf6c', '#ffc107', '#ff4757'],
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { color: '#999', font: { family: "'IBM Plex Mono', monospace", size: 11 } }
+          },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                const total = ctx.dataset.data.reduce((a,b) => a+b, 0);
+                const pct = total ? Math.round(ctx.raw / total * 100) : 0;
+                return `${ctx.label}: ${fmtMoney(ctx.raw)} (${pct}%)`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function esc(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  window.addEventListener('wb:tab-activated:abcxyz', abcLoad);
+  window.addEventListener('wb:cabinet-changed', () => { if (rawData) abcLoad(); });
+  window.addEventListener('wb:period-changed', () => { if (rawData) abcLoad(); });
+})();
+</script>

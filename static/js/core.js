@@ -160,6 +160,8 @@ async function loadCabinets() {
           sel.innerHTML += `<option value="${c.cabinet_id}">${c.seller_name}</option>`;
         }
       });
+      // Автоматически выбираем первый кабинет
+      setCabinet(cabs[0].cabinet_id);
     }
   } catch(e) {}
 }
