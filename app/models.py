@@ -315,6 +315,7 @@ class WbToken(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     seller_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    token: Mapped[str] = mapped_column(Text, nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -591,7 +591,7 @@ def delete_api_key(db: Session, api_key_id: int) -> bool:
 
 def create_wb_token(db: Session, user_id: int, seller_name: str, token: str) -> WbToken:
     token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
-    wb_token = WbToken(user_id=user_id, seller_name=seller_name, token_hash=token_hash)
+    wb_token = WbToken(user_id=user_id, seller_name=seller_name, token=token, token_hash=token_hash)
     db.add(wb_token)
     db.commit()
     db.refresh(wb_token)
@@ -639,7 +639,7 @@ def get_tokens_from_db() -> list[dict]:
     db = SessionLocal()
     try:
         tokens = db.query(WbToken).filter(WbToken.is_active == True).all()
-        return [{"token_hash": t.token_hash, "seller_name": t.seller_name, "user_id": t.user_id} for t in tokens]
+        return [{"token": t.token, "name": t.seller_name, "cabinet_id": t.token_hash} for t in tokens]
     finally:
         db.close()
 

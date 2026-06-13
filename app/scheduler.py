@@ -34,13 +34,14 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "356741753")
 
 def load_tokens_from_json() -> list[dict]:
     """Загрузка токенов из БД с fallback на env var."""
-    # Сначала пытаемся загрузить из БД
     db_tokens = get_tokens_from_db()
     if db_tokens:
-        logger.info(f"Загружено {len(db_tokens)} кабинетов из БД")
-        return db_tokens
+        valid = [t for t in db_tokens if t.get("token")]
+        if len(valid) < len(db_tokens):
+            logger.warning(f"Пропущено {len(db_tokens) - len(valid)} кабинетов без сохранённого токена")
+        logger.info(f"Загружено {len(valid)} кабинетов из БД")
+        return valid
     
-    # Fallback: загрузка из env var (для обратной совместимости)
     raw = os.getenv("WB_TOKENS_JSON", "{}")
     try:
         data = json.loads(raw)
