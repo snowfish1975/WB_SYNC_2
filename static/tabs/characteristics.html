@@ -319,30 +319,41 @@
 
     // Характеристики
     const opts = c.opts || [];
+    const dims = c.dimensions || {};
     const optsEl = document.getElementById('charOpts');
+    let optsHtml = '';
+
+    // Габариты
+    if (dims.weightBrutto || dims.length || dims.width || dims.height) {
+      optsHtml += '<div style="grid-column:1/-1;margin-bottom:4px;">';
+      const dimParts = [];
+      if (dims.weightBrutto) dimParts.push(`Вес: ${dims.weightBrutto} кг`);
+      if (dims.length) dimParts.push(`Длина: ${dims.length} см`);
+      if (dims.width) dimParts.push(`Ширина: ${dims.width} см`);
+      if (dims.height) dimParts.push(`Высота: ${dims.height} см`);
+      optsHtml += `<div class="char-opt"><span class="char-opt-name">Габариты</span><span class="char-opt-val">${esc(dimParts.join(' × '))}</span></div>`;
+      optsHtml += '</div>';
+    }
+
     if (opts.length) {
-      optsEl.innerHTML = opts.map(o => {
+      optsHtml += opts.map(o => {
         const name = o.name || o.paramName || '';
         const val = o.value || o.paramValue || '';
         return `<div class="char-opt"><span class="char-opt-name">${esc(name)}</span><span class="char-opt-val">${esc(val)}</span></div>`;
       }).join('');
     } else {
-      // Fallback: показываем ключевые поля
       const fallback = [
         ['Цвет', c.color],
         ['Размер', c.size],
         ['Артикул поставщика', c.vendorCode],
         ['Предмет', c.subjectName],
         ['Бренд', c.brand],
-        ['Вес', c.weight],
-        ['Длина', c.length],
-        ['Ширина', c.width],
-        ['Высота', c.height],
       ].filter(([,v]) => v);
-      optsEl.innerHTML = fallback.map(([k,v]) =>
+      optsHtml += fallback.map(([k,v]) =>
         `<div class="char-opt"><span class="char-opt-name">${esc(k)}</span><span class="char-opt-val">${esc(String(v))}</span></div>`
       ).join('');
     }
+    optsEl.innerHTML = optsHtml;
 
     // Подсветка строки в таблице
     document.querySelectorAll('#charsBody tr').forEach((tr, i) => {

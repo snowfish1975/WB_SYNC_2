@@ -250,6 +250,13 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/dashboard/cabinets")
+def dashboard_cabinets():
+    """Список всех активных кабинетов из БД."""
+    mapping = load_token_mapping()
+    return [{"cabinet_id": cid, "seller_name": name} for cid, name in mapping.items()]
+
+
 @app.get("/api/dashboard/summary")
 def dashboard_summary(days_back: int = Query(40, ge=1, le=90), db: Session = Depends(get_db)):
     """Сводные цифры: заказы, выручка, возвраты, отмены."""

@@ -144,4 +144,22 @@ window.triggerSync = async function() {
 // ---- ИНИЦИАЛИЗАЦИЯ ----
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme(WB.theme);
+  loadCabinets();
 });
+
+// ---- ЗАГРУЗКА СПИСКА КАБИНЕТОВ ----
+async function loadCabinets() {
+  try {
+    const res = await fetch('/api/dashboard/cabinets');
+    const cabs = await res.json();
+    if (cabs.length) {
+      WB.cabinets = cabs;
+      document.querySelectorAll('.global-cab-select').forEach(sel => {
+        sel.innerHTML = '<option value="">Все кабинеты</option>';
+        for (const c of cabs) {
+          sel.innerHTML += `<option value="${c.cabinet_id}">${c.seller_name}</option>`;
+        }
+      });
+    }
+  } catch(e) {}
+}
