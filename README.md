@@ -2,7 +2,7 @@
 
 Сервис синхронизации данных Wildberries с дашбордом аналитики.
 
-Загружает данные из API Wildberries (характеристики, остатки, заказы, цены, продажи, аналитику), сохраняет в PostgreSQL и предоставляет REST API + дашборд.
+Загружает данные из API Wildberries (характеристики, остатки, заказы, цены, продажи, аналитику, рекламу), сохраняет в PostgreSQL и предоставляет REST API + дашборд с 15 вкладками.
 
 ---
 
@@ -13,8 +13,9 @@
 - Автоматическая ежедневная синхронизация по расписанию
 - Ручной запуск синхронизации через API
 - Telegram-уведомления о результатах синхронизации
-- Встроенный дашборд с 12 вкладками аналитики
-- Raw data API для внешних потребителей
+- Встроенный дашборд с 15 вкладками аналитики
+- 14 raw data API эндпоинтов для внешних потребителей
+- 3 темы оформления (тёмная, ночная, светлая)
 
 ---
 
@@ -26,7 +27,7 @@
 - Заказы за 40 дней (statistics-api)
 - Цены и скидки (prices-api)
 - Продажи за 40 дней (statistics-api)
-- Отчёт реализации за вчера (statistics-api)
+- Отчёт реализации за вчера (statistics-api, 55+ полей)
 
 ### Аналитика (analytics-api)
 - **Воронка продаж v3** — просмотры, конверсия в корзину/заказ, выкупы, сравнение с прошлым периодом
@@ -38,6 +39,12 @@
 - **Кампании** — список, статусы, типы ставок
 - **Статистика** — просмотры, клики, CTR, CPC, CR, заказы, затраты
 - **Затраты** — история списаний по дням с указанием кампании
+- **Поисковые кластеры** — поисковые запросы, ставки, CTR, конверсия
+
+### Расчётная аналитика
+- **ABC/XYZ анализ** — классификация товаров по выручке и стабильности спроса
+- **Прогноз остатков** — прогнозное пополнение запасов на 30 дней
+- **Юнит-экономика** — чистая прибыль, маржинальность, ROMI, CPA, LTV по каждому SKU
 
 ---
 
@@ -51,18 +58,18 @@ WB API → scheduler → PostgreSQL → FastAPI → клиент / дашбор�
 
 ```
 app/
-├── main.py               — FastAPI: эндпоинты, дашборд, лайфспан
+├── main.py               — FastAPI: 40+ эндпоинтов, дашборд, лайфспан
 ├── scheduler.py           — Планировщик: синхронизация + Telegram
-├── crud.py                — CRUD-операции с БД
+├── crud.py                — CRUD-операции с БД (~1300 строк)
 ├── wb_client.py           — Клиент WB API (характеристики, остатки, заказы, цены, продажи)
-├── wb_analytics_client.py — Клиент WB Analytics API (воронка, склады, оценки)
-├── models.py              — SQLAlchemy модели
+├── wb_analytics_client.py — Клиент WB Analytics + Advert API
+├── models.py              — 18 SQLAlchemy моделей
 ├── schemas.py             — Pydantic-схемы
 └── database.py            — Подключение к PostgreSQL
 
 static/
 ├── dashboard.html         — Оболочка дашборда
-├── tabs/
+├── tabs/                  — 15 вкладок аналитики
 │   ├── summary.html       — Сводка
 │   ├── orders.html        — Заказы
 │   ├── stocks.html        — Остатки
@@ -72,14 +79,17 @@ static/
 │   ├── conversion.html    — Воронка конверсии
 │   ├── stock-offices.html — Остатки по складам
 │   ├── item-ratings.html  — Оценки и отзывы
-│   ├── advert.html         — Реклама
+│   ├── advert.html        — Реклама
+│   ├── search-clusters.html — Поисковые кластеры
 │   ├── characteristics.html — Характеристики
-│   └── abc-xyz.html       — ABC/XYZ анализ
+│   ├── abc-xyz.html       — ABC/XYZ анализ
+│   ├── stock-forecast.html — Прогноз остатков
+│   └── unit-economics.html — Юнит-экономика
 ├── js/
 │   ├── core.js            — Глобальное состояние, фильтры, утилиты
 │   └── tabs.js            — Логика вкладок и динамическая загрузка
 ├── base.css               — Стили
-└── themes.css             — Темы оформления
+└── themes.css             — Темы оформления (dark, midnight, light)
 
 alembic/
 └── versions/              — Миграции БД
@@ -97,6 +107,7 @@ alembic/
 - httpx (async HTTP)
 - Pydantic 2.x
 - Alembic (миграции)
+- Chart.js (графики)
 
 ---
 
@@ -154,18 +165,26 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## API
 
-### Данные (POST, raw data)
+### Сырые данные (POST, raw data)
 
-| Эндпоинт | Описание |
-|----------|----------|
-| `/api/products` | Характеристики товаров |
-| `/api/stocks` | Остатки на складах |
-| `/api/orders` | Заказы (days_back, limit, offset, fields) |
-| `/api/sales` | Продажи и возвраты |
-| `/api/prices` | Цены и скидки |
-| `/api/sales-report` | Отчёт реализации |
+| Эндпоинт | Модель | Описание |
+|----------|--------|----------|
+| `/api/products` | ProductCharacteristic | Характеристики товаров |
+| `/api/stocks` | Stock | Остатки на складах |
+| `/api/orders` | Order | Заказы (days_back, limit, offset) |
+| `/api/sales` | Sale | Продажи и возвраты |
+| `/api/prices` | Price | Цены и скидки |
+| `/api/sales-report` | SalesReport | Отчёт реализации (55+ полей) |
+| `/api/shelf-metrics` | ShelfMetric | Данные витрины продаж |
+| `/api/funnel-metrics` | FunnelMetric | Данные воронки конверсии |
+| `/api/stock-offices` | StockByOffice | Остатки по офисам/регионам |
+| `/api/item-ratings` | ItemRating | Рейтинги и отзывы товаров |
+| `/api/ad-campaigns` | AdCampaign | Рекламные кампании |
+| `/api/ad-stats` | AdCampaignStats | Статистика рекламы по дням |
+| `/api/ad-expenses` | AdExpense | История затрат на рекламу |
+| `/api/ad-search-clusters` | AdSearchCluster | Поисковые кластеры |
 
-### Аналитика дашборда (GET)
+### Агрегированные данные дашборда (GET)
 
 | Эндпоинт | Описание |
 |----------|----------|
@@ -182,7 +201,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `/api/dashboard/ad-campaigns` | Рекламные кампании |
 | `/api/dashboard/ad-stats` | Статистика рекламы (CTR, CPC, CR, ROI) |
 | `/api/dashboard/ad-expenses` | История затрат на рекламу |
+| `/api/dashboard/ad-search-clusters` | Поисковые кластеры |
 | `/api/dashboard/abc-xyz` | ABC/XYZ анализ |
+| `/api/dashboard/stock-forecast` | Прогноз остатков на 30 дней |
+| `/api/dashboard/unit-economics` | Юнит-экономика по SKU |
 | `/api/dashboard/characteristics` | Характеристики товаров |
 | `/api/dashboard/cabinets` | Список кабинетов |
 
@@ -213,9 +235,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
    - Воронка продаж v3 (просмотры, конверсия, выкупы)
    - Остатки по складам (регионы, склады)
    - Оценки товаров (рейтинги, отзывы)
+   - Рекламные кампании, статистика, затраты, поисковые кластеры
 2. **Отчёт реализации** — ежедневно в 07:30 UTC (10:30 МСК)
 
 Лимиты WB Analytics API: 3 запроса в минуту, интервал 20 сек.
+Лимиты WB Advert API: 3 запроса в минуту (статистика), 1 запрос в час (остальные).
 
 ---
 
@@ -237,6 +261,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 - Автоочистка заказов и продаж старше 40 дней
 - Кэш-бастинг статических файлов
 - raw_data JSON-хранилище для полных ответов API
+- Дедупликация данных (уникальные конstraintы для каждой модели)
+- Автоматический выбор первого кабинета при загрузке
 
 ---
 
@@ -248,6 +274,6 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Analytics API v1 | `seller-analytics-api.wildberries.ru` | Остатки на складах, оценки товаров |
 | Analytics API v3 | `seller-analytics-api.wildberries.ru` | Воронка продаж |
 | Analytics API v2 | `seller-analytics-api.wildberries.ru` | Остатки по группам/складам |
-| Statistics API | `statistics-api.wildberries.ru` | Заказы, продажи |
+| Statistics API | `statistics-api.wildberries.ru` | Заказы, продажи, отчёт реализации |
 | Prices API | `discounts-prices-api.wildberries.ru` | Цены и скидки |
-| Advert API | `advert-api.wildberries.ru` | Рекламные кампании, статистика, затраты |
+| Advert API | `advert-api.wildberries.ru` | Реклама, статистика, затраты, поиск |
