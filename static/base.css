@@ -131,7 +131,7 @@ body {
 .theme-dot.active { border-color: var(--text); }
 .theme-dot[data-t="dark"]     { background: linear-gradient(135deg, #0a0a0f 50%, #ff6b35 50%); }
 .theme-dot[data-t="midnight"] { background: linear-gradient(135deg, #07071a 50%, #a855f7 50%); }
-.theme-dot[data-t="slate"]    { background: linear-gradient(135deg, #0e1117 50%, #38bdf8 50%); }
+.theme-dot[data-t="light"]    { background: linear-gradient(135deg, #f5f5f7 50%, #ff6b35 50%); }
 
 .last-sync {
   font-family: 'IBM Plex Mono', monospace;
