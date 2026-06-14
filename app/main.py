@@ -27,6 +27,7 @@ from app.crud import (
     load_token_mapping,
     get_shelf_metrics, get_funnel_metrics, get_stock_by_offices, get_item_ratings,
     get_ad_campaigns, get_ad_stats, get_ad_expenses,
+    get_stock_forecast, get_unit_economics,
 )
 from app.models import User, ApiKey, WbToken
 from app.models import ProductCharacteristic, Stock, Order, Price, SalesReport, Sale
@@ -845,12 +846,29 @@ def dashboard_item_ratings(
     db: Session = Depends(get_db),
 ):
     """Оценки и отзывы товаров."""
+    from sqlalchemy import func
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
+    latest = (
+        db.query(
+            ItemRating.cabinet_id,
+            ItemRating.nm_id,
+            func.max(ItemRating.period_end).label("max_period_end")
+        )
+        .filter(ItemRating.period_end >= threshold)
+        .group_by(ItemRating.cabinet_id, ItemRating.nm_id)
+        .subquery()
+    )
+
     rows = (
         db.query(ItemRating)
-        .filter(ItemRating.period_end >= threshold)
+        .join(
+            latest,
+            (ItemRating.cabinet_id == latest.c.cabinet_id) &
+            (ItemRating.nm_id == latest.c.nm_id) &
+            (ItemRating.period_end == latest.c.max_period_end)
+        )
         .order_by(ItemRating.feedback_count.desc())
         .limit(50000)
         .all()
@@ -966,7 +984,7 @@ def dashboard_ad_campaigns(
 
 @app.get("/api/dashboard/ad-stats")
 def dashboard_ad_stats(
-    days_back: int = Query(30, ge=1, le=31),
+    days_back: int = Query(30, ge=1, le=90),
     db: Session = Depends(get_db),
 ):
     """Статистика рекламных кампаний: просмотры, клики, CTR, CPC, CR, заказы, затраты."""
@@ -1005,7 +1023,7 @@ def dashboard_ad_stats(
 
 @app.get("/api/dashboard/ad-expenses")
 def dashboard_ad_expenses(
-    days_back: int = Query(30, ge=1, le=31),
+    days_back: int = Query(30, ge=1, le=90),
     db: Session = Depends(get_db),
 ):
     """История затрат на рекламу."""
@@ -1034,3 +1052,27 @@ def dashboard_ad_expenses(
             "upd_sum": r.upd_sum,
         })
     return result
+
+
+# =====================
+# STOCK FORECAST & UNIT ECONOMICS
+# =====================
+
+@app.get("/api/dashboard/stock-forecast")
+def dashboard_stock_forecast(
+    days_back: int = Query(30, ge=1, le=90),
+    cabinet_id: str = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Прогноз остатков на 30 дней."""
+    return get_stock_forecast(db, cabinet_id, days_back)
+
+
+@app.get("/api/dashboard/unit-economics")
+def dashboard_unit_economics(
+    days_back: int = Query(30, ge=1, le=90),
+    cabinet_id: str = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Юнит-экономика по каждому SKU."""
+    return get_unit_economics(db, cabinet_id, days_back)
