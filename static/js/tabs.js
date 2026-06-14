@@ -15,6 +15,8 @@ const TAB_SRCS = {
   'stock-offices': '/static/tabs/stock-offices.html',
   'item-ratings':  '/static/tabs/item-ratings.html',
   'ad':            '/static/tabs/advert.html',
+  'stock-forecast': '/static/tabs/stock-forecast.html',
+  'unit-economics': '/static/tabs/unit-economics.html',
 };
 
 const loadedTabs = new Set();

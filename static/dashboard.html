@@ -41,7 +41,7 @@
     <div class="theme-selector">
       <div class="theme-dot active" data-t="dark"     title="Dark"     onclick="applyTheme('dark')"></div>
       <div class="theme-dot"        data-t="midnight" title="Midnight"  onclick="applyTheme('midnight')"></div>
-      <div class="theme-dot"        data-t="slate"    title="Slate"     onclick="applyTheme('slate')"></div>
+      <div class="theme-dot"        data-t="light"    title="Light"     onclick="applyTheme('light')"></div>
     </div>
 
     <button class="sync-btn" onclick="triggerSync()">⟳ СИНХР</button>
@@ -63,6 +63,8 @@
   <button class="tab-btn" data-tab="ad"    onclick="switchTab('ad')">📢 Реклама</button>
   <button class="tab-btn" data-tab="chars"    onclick="switchTab('chars')">📋 Характеристики</button>
   <button class="tab-btn" data-tab="abcxyz"   onclick="switchTab('abcxyz')">📐 ABC/XYZ</button>
+  <button class="tab-btn" data-tab="stock-forecast" onclick="switchTab('stock-forecast')">📉 Прогноз</button>
+  <button class="tab-btn" data-tab="unit-economics" onclick="switchTab('unit-economics')">💰 Юнит-экономика</button>
 </nav>
 
 <!-- ============ КОНТЕНТ ТАБОВ ============ -->
@@ -79,6 +81,8 @@
   <div id="tab-ad"    class="tab-content"></div>
   <div id="tab-chars"   class="tab-content"></div>
   <div id="tab-abcxyz"  class="tab-content"></div>
+  <div id="tab-stock-forecast" class="tab-content"></div>
+  <div id="tab-unit-economics" class="tab-content"></div>
 </div>
 
 <script src="/static/js/tabs.js?v=3"></script>
