@@ -1134,6 +1134,10 @@ def get_unit_economics(db: Session, cabinet_id: str | None = None, days_back: in
             func.sum(SalesReport.penalty).label("total_penalty"),
             func.sum(SalesReport.acceptance).label("total_acceptance"),
             func.sum(SalesReport.acquiring_fee).label("total_acquiring"),
+            func.sum(SalesReport.ppvz_reward).label("total_reward"),
+            func.sum(SalesReport.deduction).label("total_deduction"),
+            func.sum(SalesReport.rebill_logistic_cost).label("total_rebill_logistic"),
+            func.sum(SalesReport.dlv_prc).label("total_dlv_prc"),
         )
         .filter(SalesReport.sale_dt >= threshold)
         .group_by(SalesReport.cabinet_id, SalesReport.nm_id, SalesReport.sa_name, SalesReport.subject_name, SalesReport.brand_name)
@@ -1158,6 +1162,10 @@ def get_unit_economics(db: Session, cabinet_id: str | None = None, days_back: in
             "penalty": round(float(row.total_penalty or 0), 2),
             "acceptance": round(float(row.total_acceptance or 0), 2),
             "acquiring": round(float(row.total_acquiring or 0), 2),
+            "reward": round(float(row.total_reward or 0), 2),
+            "deduction": round(float(row.total_deduction or 0), 2),
+            "rebill_logistic": round(float(row.total_rebill_logistic or 0), 2),
+            "dlv_prc": round(float(row.total_dlv_prc or 0), 2),
         }
 
     ad_query = (
@@ -1211,11 +1219,14 @@ def get_unit_economics(db: Session, cabinet_id: str | None = None, days_back: in
 
         revenue = report["revenue"]
         for_pay = report["for_pay"]
+        # Расширенная формула: учёт всех скрытых расходов и доходов
         total_expenses = (
             report["delivery"] + report["storage"] + report["penalty"] +
-            report["acceptance"] + report["acquiring"] + ad_spend
+            report["acceptance"] + report["acquiring"] + ad_spend +
+            report["deduction"] + report["rebill_logistic"] + report["dlv_prc"]
         )
-        net_profit = for_pay - total_expenses
+        total_income = report["reward"]  # Вознаграждение от WB
+        net_profit = for_pay + total_income - total_expenses
         margin_percent = round((net_profit / revenue * 100), 1) if revenue > 0 else 0
 
         romi = round(((net_profit - ad_spend) / ad_spend * 100), 1) if ad_spend > 0 else 0
@@ -1245,6 +1256,10 @@ def get_unit_economics(db: Session, cabinet_id: str | None = None, days_back: in
             "penalty": report["penalty"],
             "acceptance": report["acceptance"],
             "acquiring": report["acquiring"],
+            "reward": report["reward"],
+            "deduction": report["deduction"],
+            "rebill_logistic": report["rebill_logistic"],
+            "dlv_prc": report["dlv_prc"],
             "ad_spend": ad_spend,
             "ad_orders": ad_orders,
             "net_profit": net_profit,
