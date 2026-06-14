@@ -222,6 +222,128 @@ def list_sales_report(
     ]
 
 
+@app.post("/api/shelf-metrics")
+def list_shelf_metrics(
+    body: TokenRequest,
+    nm_id: int | None = Query(None, description="Фильтр по артикулу WB"),
+    days_back: int = Query(30, ge=1, le=90),
+    limit: int = Query(1000, le=50000),
+    db: Session = Depends(get_db),
+):
+    """Сырые данные витрины продаж."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+    q = db.query(ShelfMetric).filter(ShelfMetric.period_end >= threshold)
+    if nm_id:
+        q = q.filter(ShelfMetric.nm_id == nm_id)
+    rows = q.order_by(ShelfMetric.order_sum.desc()).limit(limit).all()
+    return [{**{k: v for k, v in r.__dict__.items() if not k.startswith("_")}, "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8])} for r in rows]
+
+
+@app.post("/api/funnel-metrics")
+def list_funnel_metrics(
+    body: TokenRequest,
+    nm_id: int | None = Query(None, description="Фильтр по артикулу WB"),
+    days_back: int = Query(30, ge=1, le=90),
+    limit: int = Query(1000, le=50000),
+    db: Session = Depends(get_db),
+):
+    """Сырые данные воронки конверсии."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+    q = db.query(FunnelMetric).filter(FunnelMetric.period_end >= threshold)
+    if nm_id:
+        q = q.filter(FunnelMetric.nm_id == nm_id)
+    rows = q.order_by(FunnelMetric.order_sum.desc()).limit(limit).all()
+    return [{**{k: v for k, v in r.__dict__.items() if not k.startswith("_")}, "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8])} for r in rows]
+
+
+@app.post("/api/stock-offices")
+def list_stock_offices(
+    body: TokenRequest,
+    days_back: int = Query(30, ge=1, le=90),
+    limit: int = Query(1000, le=50000),
+    db: Session = Depends(get_db),
+):
+    """Сырые данные остатков по офисам."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+    rows = db.query(StockByOffice).filter(StockByOffice.period_end >= threshold).order_by(StockByOffice.stock_sum.desc()).limit(limit).all()
+    return [{**{k: v for k, v in r.__dict__.items() if not k.startswith("_")}, "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8])} for r in rows]
+
+
+@app.post("/api/item-ratings")
+def list_item_ratings(
+    body: TokenRequest,
+    nm_id: int | None = Query(None, description="Фильтр по артикулу WB"),
+    days_back: int = Query(30, ge=1, le=90),
+    limit: int = Query(1000, le=50000),
+    db: Session = Depends(get_db),
+):
+    """Сырые данные рейтингов товаров."""
+    from sqlalchemy import func
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+    latest = db.query(ItemRating.cabinet_id, ItemRating.nm_id, func.max(ItemRating.period_end).label("mp")).filter(ItemRating.period_end >= threshold).group_by(ItemRating.cabinet_id, ItemRating.nm_id).subquery()
+    q = db.query(ItemRating).join(latest, (ItemRating.cabinet_id == latest.c.cabinet_id) & (ItemRating.nm_id == latest.c.nm_id) & (ItemRating.period_end == latest.c.mp))
+    if nm_id:
+        q = q.filter(ItemRating.nm_id == nm_id)
+    rows = q.order_by(ItemRating.feedback_count.desc()).limit(limit).all()
+    return [{**{k: v for k, v in r.__dict__.items() if not k.startswith("_")}, "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8])} for r in rows]
+
+
+@app.post("/api/ad-campaigns")
+def list_ad_campaigns(
+    body: TokenRequest,
+    limit: int = Query(1000, le=50000),
+    db: Session = Depends(get_db),
+):
+    """Сырые данные рекламных кампаний."""
+    mapping = load_token_mapping()
+    rows = db.query(AdCampaign).order_by(AdCampaign.status.desc()).limit(limit).all()
+    return [{**{k: v for k, v in r.__dict__.items() if not k.startswith("_")}, "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8])} for r in rows]
+
+
+@app.post("/api/ad-stats")
+def list_ad_stats(
+    body: TokenRequest,
+    days_back: int = Query(30, ge=1, le=90),
+    limit: int = Query(1000, le=50000),
+    db: Session = Depends(get_db),
+):
+    """Сырые данные статистики рекламы."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+    rows = db.query(AdCampaignStats).filter(AdCampaignStats.date >= threshold).order_by(AdCampaignStats.spend.desc()).limit(limit).all()
+    return [{**{k: v for k, v in r.__dict__.items() if not k.startswith("_")}, "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8])} for r in rows]
+
+
+@app.post("/api/ad-expenses")
+def list_ad_expenses(
+    body: TokenRequest,
+    days_back: int = Query(30, ge=1, le=90),
+    limit: int = Query(1000, le=50000),
+    db: Session = Depends(get_db),
+):
+    """Сырые данные затрат на рекламу."""
+    mapping = load_token_mapping()
+    threshold = datetime.now() - timedelta(days=days_back)
+    rows = db.query(AdExpense).filter(AdExpense.upd_time >= threshold).order_by(AdExpense.upd_time.desc()).limit(limit).all()
+    return [{**{k: v for k, v in r.__dict__.items() if not k.startswith("_")}, "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8])} for r in rows]
+
+
+@app.post("/api/ad-search-clusters")
+def list_ad_search_clusters(
+    body: TokenRequest,
+    limit: int = Query(1000, le=50000),
+    db: Session = Depends(get_db),
+):
+    """Сырые данные поисковых кластеров."""
+    mapping = load_token_mapping()
+    rows = db.query(AdSearchCluster).order_by(AdSearchCluster.spend.desc()).limit(limit).all()
+    return [{**{k: v for k, v in r.__dict__.items() if not k.startswith("_")}, "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8])} for r in rows]
+
+
 @app.get("/api/logs", response_model=list[SyncLogOut])
 def list_logs(db: Session = Depends(get_db)):
     mapping = load_token_mapping()
