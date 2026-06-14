@@ -1163,19 +1163,18 @@ def get_unit_economics(db: Session, cabinet_id: str | None = None, days_back: in
     ad_query = (
         db.query(
             AdCampaignStats.cabinet_id,
-            AdCampaignStats.nm_id,
             func.sum(AdCampaignStats.spend).label("total_ad_spend"),
             func.sum(AdCampaignStats.orders).label("total_ad_orders"),
         )
         .filter(AdCampaignStats.date >= threshold)
-        .group_by(AdCampaignStats.cabinet_id, AdCampaignStats.nm_id)
+        .group_by(AdCampaignStats.cabinet_id)
     )
     if cabinet_id:
         ad_query = ad_query.filter(AdCampaignStats.cabinet_id == cabinet_id)
 
     ad_data = {}
     for row in ad_query.limit(50000).all():
-        ad_data[(row.cabinet_id, row.nm_id)] = {
+        ad_data[row.cabinet_id] = {
             "ad_spend": round(float(row.total_ad_spend or 0), 2),
             "ad_orders": row.total_ad_orders or 0,
         }
@@ -1190,26 +1189,40 @@ def get_unit_economics(db: Session, cabinet_id: str | None = None, days_back: in
             shelf_names[key] = {"product_name": r.product_name or "", "vendor_code": r.vendor_code or ""}
 
     mapping = load_token_mapping()
+    
+    # Подсчитаем заказы по каждому кабинету для пропорционального распределения рекламы
+    orders_by_cabinet = {}
+    for key, report in report_data.items():
+        cab = key[0]
+        orders_by_cabinet[cab] = orders_by_cabinet.get(cab, 0) + report["quantity"]
+    
     result = []
     for key, report in report_data.items():
         cabinet_id_r, nm_id = key
-        ad = ad_data.get(key, {"ad_spend": 0, "ad_orders": 0})
+        
+        # Распределяем рекламные расходы пропорционально заказам
+        cab_total_orders = orders_by_cabinet.get(cabinet_id_r, 1) or 1
+        cab_ad = ad_data.get(cabinet_id_r, {"ad_spend": 0, "ad_orders": 0})
+        product_share = report["quantity"] / cab_total_orders if cab_total_orders > 0 else 0
+        ad_spend = round(cab_ad["ad_spend"] * product_share, 2)
+        ad_orders = round(cab_ad["ad_orders"] * product_share, 0)
+        
         shelf = shelf_names.get(key, {"product_name": "", "vendor_code": ""})
 
         revenue = report["revenue"]
         for_pay = report["for_pay"]
         total_expenses = (
             report["delivery"] + report["storage"] + report["penalty"] +
-            report["acceptance"] + report["acquiring"] + ad["ad_spend"]
+            report["acceptance"] + report["acquiring"] + ad_spend
         )
         net_profit = for_pay - total_expenses
         margin_percent = round((net_profit / revenue * 100), 1) if revenue > 0 else 0
 
-        romi = round(((net_profit - ad["ad_spend"]) / ad["ad_spend"] * 100), 1) if ad["ad_spend"] > 0 else 0
-        cpa = round(ad["ad_spend"] / ad["ad_orders"], 0) if ad["ad_orders"] > 0 else 0
+        romi = round(((net_profit - ad_spend) / ad_spend * 100), 1) if ad_spend > 0 else 0
+        cpa = round(ad_spend / ad_orders, 0) if ad_orders > 0 else 0
 
         daily_profit = net_profit / days_back if days_back > 0 else 0
-        payback_days = round(ad["ad_spend"] / daily_profit, 1) if daily_profit > 0 else 0
+        payback_days = round(ad_spend / daily_profit, 1) if daily_profit > 0 else 0
         ltv_30d = round(net_profit * (30 / days_back), 0) if days_back > 0 else 0
 
         profit_per_day = round(net_profit / days_back, 0) if days_back > 0 else 0
@@ -1232,8 +1245,8 @@ def get_unit_economics(db: Session, cabinet_id: str | None = None, days_back: in
             "penalty": report["penalty"],
             "acceptance": report["acceptance"],
             "acquiring": report["acquiring"],
-            "ad_spend": ad["ad_spend"],
-            "ad_orders": ad["ad_orders"],
+            "ad_spend": ad_spend,
+            "ad_orders": ad_orders,
             "net_profit": net_profit,
             "margin_percent": margin_percent,
             "romi": romi,
