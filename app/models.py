@@ -529,3 +529,24 @@ class AdExpense(Base):
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
     __table_args__ = (UniqueConstraint("cabinet_id", "advert_id", "upd_time", name="uq_ad_expense"),)
+
+
+class AdSearchCluster(Base):
+    """Поисковые кластеры рекламных кампаний."""
+    __tablename__ = "ad_search_clusters"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    advert_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    keyword: Mapped[str] = mapped_column(String(500), nullable=False)
+    cluster_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    bids: Mapped[int] = mapped_column(Integer, default=0)
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    clicks: Mapped[int] = mapped_column(Integer, default=0)
+    ctr: Mapped[float] = mapped_column(Float, default=0)
+    cpc: Mapped[float] = mapped_column(Float, default=0)
+    sum_price: Mapped[float] = mapped_column(Float, default=0)
+    orders: Mapped[int] = mapped_column(Integer, default=0)
+    spend: Mapped[float] = mapped_column(Float, default=0)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+    __table_args__ = (UniqueConstraint("cabinet_id", "advert_id", "keyword", name="uq_ad_search_cluster"),)

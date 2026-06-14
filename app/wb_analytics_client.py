@@ -226,3 +226,18 @@ async def fetch_ad_balance(token: str) -> dict:
         resp = await client.get(f"{ADVERT_API_BASE}/adv/v1/balance", headers=headers)
         resp.raise_for_status()
         return resp.json()
+
+
+async def fetch_ad_search_clusters(token: str, advert_id: int) -> list[dict]:
+    """GET /adv/v1/search — search clusters for a campaign"""
+    headers = {"Authorization": token}
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{ADVERT_API_BASE}/adv/v1/search",
+            headers=headers, params={"id": advert_id},
+        )
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("keywords", []) if isinstance(data, dict) else data

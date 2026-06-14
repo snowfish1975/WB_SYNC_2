@@ -17,6 +17,7 @@ const TAB_SRCS = {
   'ad':            '/static/tabs/advert.html',
   'stock-forecast': '/static/tabs/stock-forecast.html',
   'unit-economics': '/static/tabs/unit-economics.html',
+  'search-clusters': '/static/tabs/search-clusters.html',
 };
 
 const loadedTabs = new Set();

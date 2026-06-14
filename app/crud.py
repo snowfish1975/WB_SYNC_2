@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from app.models import ProductCharacteristic, SyncLog, Stock, Order, Price, SalesReport, Sale, User, ApiKey, WbToken, ShelfMetric, FunnelMetric, StockByOffice, ItemRating, AdCampaign, AdCampaignStats, AdExpense
+from app.models import ProductCharacteristic, SyncLog, Stock, Order, Price, SalesReport, Sale, User, ApiKey, WbToken, ShelfMetric, FunnelMetric, StockByOffice, ItemRating, AdCampaign, AdCampaignStats, AdExpense, AdSearchCluster
 from datetime import datetime, timedelta
 import os
 import hashlib
@@ -1011,6 +1011,44 @@ def get_ad_expenses(db: Session, cabinet_id: str | None = None):
     if cabinet_id:
         q = q.filter(AdExpense.cabinet_id == cabinet_id)
     return q.order_by(AdExpense.upd_time.desc()).limit(100000).all()
+
+
+# -------------------------
+# Ad Search Clusters (Поисковые кластеры)
+# -------------------------
+def clear_ad_search_clusters(db: Session, cabinet_id: str, advert_id: int):
+    db.query(AdSearchCluster).filter(
+        AdSearchCluster.cabinet_id == cabinet_id,
+        AdSearchCluster.advert_id == advert_id
+    ).delete()
+    db.commit()
+
+def upsert_ad_search_cluster(db: Session, cabinet_id: str, advert_id: int, keyword_data: dict):
+    stmt = pg_insert(AdSearchCluster).values(
+        cabinet_id=cabinet_id,
+        advert_id=advert_id,
+        keyword=keyword_data.get("keyword", ""),
+        cluster_id=keyword_data.get("clusterId"),
+        bids=keyword_data.get("bids", 0),
+        views=keyword_data.get("views", 0),
+        clicks=keyword_data.get("clicks", 0),
+        ctr=keyword_data.get("ctr", 0),
+        cpc=keyword_data.get("cpc", 0),
+        sum_price=keyword_data.get("sum", 0),
+        orders=keyword_data.get("orders", 0),
+        spend=keyword_data.get("spend", 0),
+        raw_data=keyword_data,
+    ).on_conflict_do_update(
+        constraint="uq_ad_search_cluster",
+        set_={"views": pg_insert(AdSearchCluster).excluded.views, "clicks": pg_insert(AdSearchCluster).excluded.clicks, "ctr": pg_insert(AdSearchCluster).excluded.ctr, "cpc": pg_insert(AdSearchCluster).excluded.cpc, "sum_price": pg_insert(AdSearchCluster).excluded.sum_price, "orders": pg_insert(AdSearchCluster).excluded.orders, "spend": pg_insert(AdSearchCluster).excluded.spend, "raw_data": pg_insert(AdSearchCluster).excluded.raw_data, "synced_at": datetime.utcnow()},
+    )
+    db.execute(stmt)
+
+def get_ad_search_clusters(db: Session, cabinet_id: str | None = None):
+    q = db.query(AdSearchCluster)
+    if cabinet_id:
+        q = q.filter(AdSearchCluster.cabinet_id == cabinet_id)
+    return q.order_by(AdSearchCluster.spend.desc()).limit(100000).all()
 
 
 # -------------------------

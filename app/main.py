@@ -28,10 +28,11 @@ from app.crud import (
     get_shelf_metrics, get_funnel_metrics, get_stock_by_offices, get_item_ratings,
     get_ad_campaigns, get_ad_stats, get_ad_expenses,
     get_stock_forecast, get_unit_economics,
+    get_ad_search_clusters,
 )
 from app.models import User, ApiKey, WbToken
 from app.models import ProductCharacteristic, Stock, Order, Price, SalesReport, Sale
-from app.models import ShelfMetric, FunnelMetric, StockByOffice, ItemRating, AdCampaign, AdCampaignStats, AdExpense
+from app.models import ShelfMetric, FunnelMetric, StockByOffice, ItemRating, AdCampaign, AdCampaignStats, AdExpense, AdSearchCluster
 from app.scheduler import run_sync_all, run_sales_report_sync
 
 from fastapi.responses import JSONResponse
@@ -1076,3 +1077,12 @@ def dashboard_unit_economics(
 ):
     """Юнит-экономика по каждому SKU."""
     return get_unit_economics(db, cabinet_id, days_back)
+
+
+@app.get("/api/dashboard/ad-search-clusters")
+def dashboard_ad_search_clusters(
+    cabinet_id: str = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Поисковые кластеры рекламных кампаний."""
+    return get_ad_search_clusters(db, cabinet_id)

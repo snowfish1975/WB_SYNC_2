@@ -15,7 +15,7 @@ from app.wb_client import (
     fetch_sales_report,
     fetch_sales_stream,
 )
-from app.wb_analytics_client import fetch_sales_funnel, fetch_stock_by_offices, fetch_item_rating, fetch_ad_campaigns, fetch_ad_campaign_details, fetch_ad_stats, fetch_ad_expenses
+from app.wb_analytics_client import fetch_sales_funnel, fetch_stock_by_offices, fetch_item_rating, fetch_ad_campaigns, fetch_ad_campaign_details, fetch_ad_stats, fetch_ad_expenses, fetch_ad_search_clusters
 from app.crud import (
     upsert_characteristic, upsert_stock, log_sync, upsert_price,
     upsert_sales_report_row, upsert_orders_bulk, upsert_sales_bulk,
@@ -28,6 +28,7 @@ from app.crud import (
     clear_ad_campaigns, upsert_ad_campaign, upsert_ad_campaign_detail,
     clear_ad_stats, upsert_ad_stats,
     clear_ad_expenses, upsert_ad_expense,
+    clear_ad_search_clusters, upsert_ad_search_cluster,
 )
 from app.database import SessionLocal
 
@@ -269,6 +270,7 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
             # --- Оценки товаров (end date не может быть сегодня) ---
             yesterday = (now_ms - timedelta(days=1)).strftime("%Y-%m-%d")
             logger.info(f"[{name}] загрузка оценок товаров...")
+            clear_item_ratings(db, tid)
             ratings_data, seller_rating = await fetch_item_rating(token, date_from=date_from, date_to=yesterday)
             ratings_count = 0
             for card in ratings_data:
@@ -332,9 +334,24 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
                 result["ad_campaigns"] = len(ad_campaigns)
                 result["ad_stats_camps"] = len(active_ids) if active_ids else 0
                 result["ad_expenses"] = len(expenses)
+                
+                # Поисковые кластеры (для активных кампаний)
+                clusters_count = 0
+                for aid in active_ids[:10]:  # Ограничиваем 10 кампаниями для экономии API-вызовов
+                    try:
+                        clusters = await fetch_ad_search_clusters(token, aid)
+                        clear_ad_search_clusters(db, tid, aid)
+                        for kw in clusters:
+                            upsert_ad_search_cluster(db, tid, aid, kw)
+                            clusters_count += 1
+                        db.commit()
+                    except Exception as e:
+                        logger.warning(f"[{name}] Ошибка загрузки кластеров для кампании {aid}: {e}")
+                result["ad_clusters"] = clusters_count
+                
                 del ad_campaigns
                 gc.collect()
-                logger.info(f"[{name}] Реклама: кампании={result.get('ad_campaigns', 0)}, статистика={result.get('ad_stats_camps', 0)}, затраты={result.get('ad_expenses', 0)}")
+                logger.info(f"[{name}] Реклама: кампании={result.get('ad_campaigns', 0)}, статистика={result.get('ad_stats_camps', 0)}, затраты={result.get('ad_expenses', 0)}, кластеры={clusters_count}")
             except Exception as e:
                 logger.error(f"[{name}] ошибка рекламы: {e}")
 
