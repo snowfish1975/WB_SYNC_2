@@ -1011,3 +1011,237 @@ def get_ad_expenses(db: Session, cabinet_id: str | None = None):
     if cabinet_id:
         q = q.filter(AdExpense.cabinet_id == cabinet_id)
     return q.order_by(AdExpense.upd_time.desc()).limit(100000).all()
+
+
+# -------------------------
+# Stock Forecast (Прогноз остатков)
+# -------------------------
+def get_stock_forecast(db: Session, cabinet_id: str | None = None, days_back: int = 30):
+    """Прогноз остатков на 30 дней на основе скорости продаж."""
+    from sqlalchemy import func
+    from app.models import Stock, Sale, ShelfMetric
+
+    threshold = datetime.now() - timedelta(days=days_back)
+
+    stock_query = (
+        db.query(
+            Stock.cabinet_id,
+            Stock.nm_id,
+            func.sum(Stock.quantity).label("qty"),
+            func.sum(Stock.in_way_to_client).label("in_way_to"),
+            func.sum(Stock.in_way_from_client).label("in_way_from"),
+        )
+        .group_by(Stock.cabinet_id, Stock.nm_id)
+    )
+    if cabinet_id:
+        stock_query = stock_query.filter(Stock.cabinet_id == cabinet_id)
+    stocks = {row.nm_id: row for row in stock_query.all()}
+
+    velocity_query = (
+        db.query(
+            Sale.cabinet_id,
+            Sale.nm_id,
+            func.count(Sale.srid).label("total_sales"),
+        )
+        .filter(Sale.date >= threshold)
+        .group_by(Sale.cabinet_id, Sale.nm_id)
+    )
+    if cabinet_id:
+        velocity_query = velocity_query.filter(Sale.cabinet_id == cabinet_id)
+    velocities = {}
+    for row in velocity_query.all():
+        velocities[(row.cabinet_id, row.nm_id)] = row.total_sales / days_back
+
+    shelf_query = db.query(ShelfMetric).distinct(ShelfMetric.nm_id, ShelfMetric.cabinet_id)
+    if cabinet_id:
+        shelf_query = shelf_query.filter(ShelfMetric.cabinet_id == cabinet_id)
+    shelf_data = {}
+    for r in shelf_query.limit(50000).all():
+        key = (r.cabinet_id, r.nm_id)
+        if key not in shelf_data:
+            shelf_data[key] = r
+
+    mapping = load_token_mapping()
+    result = []
+    for nm_id, stock_row in stocks.items():
+        cab = stock_row.cabinet_id
+        vel = velocities.get((cab, nm_id), 0)
+        current_stock = (stock_row.qty or 0) + (stock_row.in_way_to or 0) - (stock_row.in_way_from or 0)
+        if current_stock < 0:
+            current_stock = 0
+
+        dos = round(current_stock / vel, 1) if vel > 0 else 999
+        if dos < 7:
+            dos_status = "red"
+        elif dos < 14:
+            dos_status = "yellow"
+        else:
+            dos_status = "green"
+
+        if vel > 0:
+            forecast_days = int(current_stock / vel)
+            forecast_date = (datetime.now() + timedelta(days=forecast_days)).strftime("%Y-%m-%d")
+        else:
+            forecast_date = None
+
+        forecast_curve = [max(0, round(current_stock - vel * d, 1)) for d in range(31)]
+
+        shelf = shelf_data.get((cab, nm_id))
+        product_name = shelf.product_name if shelf else ""
+        vendor_code = shelf.vendor_code if shelf else ""
+
+        result.append({
+            "cabinet_id": cab,
+            "seller_name": mapping.get(cab, cab[:8]),
+            "nm_id": nm_id,
+            "vendor_code": vendor_code,
+            "product_name": product_name,
+            "current_stock": current_stock,
+            "velocity": round(vel, 2),
+            "dos": dos,
+            "dos_status": dos_status,
+            "forecast_date": forecast_date,
+            "forecast_curve": forecast_curve,
+        })
+
+    result.sort(key=lambda x: x["dos"])
+    return result
+
+
+# -------------------------
+# Unit Economics (Юнит-экономика)
+# -------------------------
+def get_unit_economics(db: Session, cabinet_id: str | None = None, days_back: int = 30):
+    """Юнит-экономика по каждому SKU: выручка, расходы, чистая прибыль, маржа, ROMI."""
+    from sqlalchemy import func
+    from app.models import SalesReport, AdCampaignStats, ShelfMetric
+
+    threshold = datetime.now() - timedelta(days=days_back)
+
+    report_query = (
+        db.query(
+            SalesReport.cabinet_id,
+            SalesReport.nm_id,
+            SalesReport.sa_name.label("vendor_code"),
+            SalesReport.subject_name,
+            SalesReport.brand_name,
+            func.sum(SalesReport.quantity).label("total_quantity"),
+            func.sum(SalesReport.retail_price_withdisc_rub).label("total_revenue"),
+            func.sum(SalesReport.ppvz_for_pay).label("total_for_pay"),
+            func.sum(SalesReport.ppvz_sales_commission).label("total_commission"),
+            func.sum(SalesReport.delivery_rub).label("total_delivery"),
+            func.sum(SalesReport.storage_fee).label("total_storage"),
+            func.sum(SalesReport.penalty).label("total_penalty"),
+            func.sum(SalesReport.acceptance).label("total_acceptance"),
+            func.sum(SalesReport.acquiring_fee).label("total_acquiring"),
+        )
+        .filter(SalesReport.sale_dt >= threshold)
+        .group_by(SalesReport.cabinet_id, SalesReport.nm_id, SalesReport.sa_name, SalesReport.subject_name, SalesReport.brand_name)
+    )
+    if cabinet_id:
+        report_query = report_query.filter(SalesReport.cabinet_id == cabinet_id)
+
+    report_data = {}
+    for row in report_query.limit(50000).all():
+        report_data[(row.cabinet_id, row.nm_id)] = {
+            "cabinet_id": row.cabinet_id,
+            "nm_id": row.nm_id,
+            "vendor_code": row.vendor_code or "",
+            "subject_name": row.subject_name or "",
+            "brand_name": row.brand_name or "",
+            "quantity": row.total_quantity or 0,
+            "revenue": round(float(row.total_revenue or 0), 2),
+            "for_pay": round(float(row.total_for_pay or 0), 2),
+            "commission": round(float(row.total_commission or 0), 2),
+            "delivery": round(float(row.total_delivery or 0), 2),
+            "storage": round(float(row.total_storage or 0), 2),
+            "penalty": round(float(row.total_penalty or 0), 2),
+            "acceptance": round(float(row.total_acceptance or 0), 2),
+            "acquiring": round(float(row.total_acquiring or 0), 2),
+        }
+
+    ad_query = (
+        db.query(
+            AdCampaignStats.cabinet_id,
+            AdCampaignStats.nm_id,
+            func.sum(AdCampaignStats.spend).label("total_ad_spend"),
+            func.sum(AdCampaignStats.orders).label("total_ad_orders"),
+        )
+        .filter(AdCampaignStats.date >= threshold)
+        .group_by(AdCampaignStats.cabinet_id, AdCampaignStats.nm_id)
+    )
+    if cabinet_id:
+        ad_query = ad_query.filter(AdCampaignStats.cabinet_id == cabinet_id)
+
+    ad_data = {}
+    for row in ad_query.limit(50000).all():
+        ad_data[(row.cabinet_id, row.nm_id)] = {
+            "ad_spend": round(float(row.total_ad_spend or 0), 2),
+            "ad_orders": row.total_ad_orders or 0,
+        }
+
+    shelf_query = db.query(ShelfMetric).distinct(ShelfMetric.nm_id, ShelfMetric.cabinet_id)
+    if cabinet_id:
+        shelf_query = shelf_query.filter(ShelfMetric.cabinet_id == cabinet_id)
+    shelf_names = {}
+    for r in shelf_query.limit(50000).all():
+        key = (r.cabinet_id, r.nm_id)
+        if key not in shelf_names:
+            shelf_names[key] = {"product_name": r.product_name or "", "vendor_code": r.vendor_code or ""}
+
+    mapping = load_token_mapping()
+    result = []
+    for key, report in report_data.items():
+        cabinet_id_r, nm_id = key
+        ad = ad_data.get(key, {"ad_spend": 0, "ad_orders": 0})
+        shelf = shelf_names.get(key, {"product_name": "", "vendor_code": ""})
+
+        revenue = report["revenue"]
+        for_pay = report["for_pay"]
+        total_expenses = (
+            report["delivery"] + report["storage"] + report["penalty"] +
+            report["acceptance"] + report["acquiring"] + ad["ad_spend"]
+        )
+        net_profit = for_pay - total_expenses
+        margin_percent = round((net_profit / revenue * 100), 1) if revenue > 0 else 0
+
+        romi = round(((net_profit - ad["ad_spend"]) / ad["ad_spend"] * 100), 1) if ad["ad_spend"] > 0 else 0
+        cpa = round(ad["ad_spend"] / ad["ad_orders"], 0) if ad["ad_orders"] > 0 else 0
+
+        daily_profit = net_profit / days_back if days_back > 0 else 0
+        payback_days = round(ad["ad_spend"] / daily_profit, 1) if daily_profit > 0 else 0
+        ltv_30d = round(net_profit * (30 / days_back), 0) if days_back > 0 else 0
+
+        profit_per_day = round(net_profit / days_back, 0) if days_back > 0 else 0
+        profit_curve = [round(profit_per_day * (d + 1), 0) for d in range(min(days_back, 30))]
+
+        result.append({
+            "cabinet_id": cabinet_id_r,
+            "seller_name": mapping.get(cabinet_id_r, cabinet_id_r[:8]),
+            "nm_id": nm_id,
+            "vendor_code": shelf["vendor_code"] or report["vendor_code"],
+            "product_name": shelf["product_name"],
+            "subject_name": report["subject_name"],
+            "brand_name": report["brand_name"],
+            "quantity": report["quantity"],
+            "revenue": revenue,
+            "for_pay": for_pay,
+            "commission": report["commission"],
+            "delivery": report["delivery"],
+            "storage": report["storage"],
+            "penalty": report["penalty"],
+            "acceptance": report["acceptance"],
+            "acquiring": report["acquiring"],
+            "ad_spend": ad["ad_spend"],
+            "ad_orders": ad["ad_orders"],
+            "net_profit": net_profit,
+            "margin_percent": margin_percent,
+            "romi": romi,
+            "cpa": cpa,
+            "payback_days": payback_days,
+            "ltv_30d": ltv_30d,
+            "profit_curve": profit_curve,
+        })
+
+    result.sort(key=lambda x: x["net_profit"], reverse=True)
+    return result
