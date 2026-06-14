@@ -1,0 +1,202 @@
+<!-- ============================================================
+     TAB: ЮНИТ-ЭКОНОМИКА
+     ============================================================ -->
+<div id="unitEconomicsTab">
+  <div class="summary-grid section-mb" id="ueMetrics"></div>
+
+  <div class="card section-mb">
+    <div class="section-title">Юнит-экономика по товарам</div>
+    <div class="filters">
+      <input class="filter-input" id="ueSearch" placeholder="Артикул / товар..." oninput="ueFilter()">
+      <select class="filter-select" id="ueMarginFilter" onchange="ueFilter()">
+        <option value="">Все маржа</option>
+        <option value="high">Высокая (&gt; 20%)</option>
+        <option value="mid">Средняя (10-20%)</option>
+        <option value="low">Низкая (&lt; 10%)</option>
+        <option value="negative">Убыточные</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="ueSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="ueSort('nm_id')">АРТ WB ↕</th>
+          <th onclick="ueSort('vendor_code')">АРТ ПОСТАВЩИКА ↕</th>
+          <th onclick="ueSort('product_name')">ТОВАР ↕</th>
+          <th onclick="ueSort('revenue')">ВЫРУЧКА ↕</th>
+          <th onclick="ueSort('for_pay')">К ЗАЧЁТУ ↕</th>
+          <th onclick="ueSort('net_profit')">ПРИБЫЛЬ ↕</th>
+          <th onclick="ueSort('margin_percent')">МАРЖА ↕</th>
+          <th onclick="ueSort('romi')">ROMI ↕</th>
+          <th onclick="ueSort('cpa')">CPA ↕</th>
+          <th onclick="ueSort('payback_days')">ОКУП. ↕</th>
+          <th>ГРАФИК</th>
+        </tr></thead>
+        <tbody id="ueBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="uePagination"></div>
+  </div>
+
+  <div class="card" id="ueDetail" style="display:none;">
+    <div class="section-title">Детализация товара</div>
+    <div id="ueDetailContent"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let data = [], filtered = [], page = 1;
+  const PER = 50;
+  let sortCol = 'net_profit', sortDir = -1;
+
+  async function ueLoad() {
+    document.getElementById('ueBody').innerHTML = '';
+    try {
+      const res = await fetch(`/api/dashboard/unit-economics?days_back=${WB.period}`);
+      data = await res.json();
+    } catch(e) { data = []; }
+    ueFilter();
+    renderMetrics();
+  }
+  window.ueLoad = ueLoad;
+
+  function ueFilter() {
+    const search = (document.getElementById('ueSearch')?.value || '').toLowerCase();
+    const marginFilter = document.getElementById('ueMarginFilter')?.value || '';
+    filtered = data.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (marginFilter === 'high' && r.margin_percent <= 20) return false;
+      if (marginFilter === 'mid' && (r.margin_percent < 10 || r.margin_percent > 20)) return false;
+      if (marginFilter === 'low' && (r.margin_percent < 0 || r.margin_percent >= 10)) return false;
+      if (marginFilter === 'negative' && r.margin_percent >= 0) return false;
+      if (search && !`${r.nm_id}`.includes(search) && !`${r.vendor_code||''}`.toLowerCase().includes(search) && !`${r.product_name||''}`.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortData();
+  }
+  window.ueFilter = ueFilter;
+
+  function ueSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+    sortData();
+  }
+  window.ueSort = ueSort;
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) va = 0; if (vb == null) vb = 0;
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    page = 1;
+    render();
+  }
+
+  function renderMetrics() {
+    const m = document.getElementById('ueMetrics');
+    if (!m) return;
+    const d = WB.cabinet ? data.filter(r => r.cabinet_id === WB.cabinet) : data;
+    const totalProfit = d.reduce((s, r) => s + r.net_profit, 0);
+    const avgMargin = d.length ? (d.reduce((s, r) => s + r.margin_percent, 0) / d.length).toFixed(1) : 0;
+    const totalAdSpend = d.reduce((s, r) => s + r.ad_spend, 0);
+    const avgROMI = totalAdSpend > 0 ? ((totalProfit - totalAdSpend) / totalAdSpend * 100).toFixed(0) : 0;
+    const avgCPA = d.reduce((s, r) => s + r.cpa, 0) / (d.filter(r => r.cpa > 0).length || 1);
+    m.innerHTML = `
+      <div class="card metric-card green"><div class="metric-label">ПРИБЫЛЬ</div><div class="metric-value">${fmtMoney(Math.round(totalProfit))}</div></div>
+      <div class="card metric-card teal"><div class="metric-label">СР. МАРЖА</div><div class="metric-value">${avgMargin}%</div></div>
+      <div class="card metric-card"><div class="metric-label">ROMI</div><div class="metric-value" style="color:${avgROMI >= 0 ? 'var(--green)' : 'var(--red)'}">${avgROMI}%</div></div>
+      <div class="card metric-card orange"><div class="metric-label">СР. CPA</div><div class="metric-value">${fmtMoney(Math.round(avgCPA))}</div></div>
+      <div class="card metric-card"><div class="metric-label">ТОВАРОВ</div><div class="metric-value">${d.length}</div></div>
+    `;
+  }
+
+  function marginColor(m) {
+    if (m > 20) return 'var(--green)';
+    if (m > 10) return 'var(--accent2)';
+    if (m >= 0) return 'var(--accent)';
+    return 'var(--red)';
+  }
+
+  function renderSparkline(curve, color) {
+    if (!curve || !curve.length) return '';
+    const max = Math.max(...curve.map(Math.abs), 1);
+    const w = 80, h = 20;
+    const step = w / (curve.length - 1);
+    const points = curve.map((v, i) => `${i * step},${h - ((v + max) / (2 * max)) * h}`).join(' ');
+    return `<svg width="${w}" height="${h}" style="display:block;"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+  }
+
+  function render() {
+    const body = document.getElementById('ueBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:30px;">Нет данных</td></tr>`;
+      document.getElementById('uePagination').innerHTML = '';
+      return;
+    }
+    body.innerHTML = slice.map((r, i) => `<tr class="fade-in" style="cursor:pointer" onclick="showDetail(${(page-1)*PER + i})">
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td class="td-mono">${r.nm_id}</td>
+      <td>${r.vendor_code || '—'}</td>
+      <td>${r.product_name || '—'}</td>
+      <td class="td-mono">${fmtMoney(Math.round(r.revenue))}</td>
+      <td class="td-mono">${fmtMoney(Math.round(r.for_pay))}</td>
+      <td class="td-mono" style="color:${r.net_profit >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:bold">${fmtMoney(Math.round(r.net_profit))}</td>
+      <td class="td-mono" style="color:${marginColor(r.margin_percent)};font-weight:bold">${r.margin_percent}%</td>
+      <td class="td-mono">${r.ad_spend > 0 ? r.romi + '%' : '—'}</td>
+      <td class="td-mono">${r.cpa > 0 ? fmtMoney(Math.round(r.cpa)) : '—'}</td>
+      <td class="td-mono">${r.payback_days > 0 ? r.payback_days + ' дн' : '—'}</td>
+      <td>${renderSparkline(r.profit_curve, marginColor(r.margin_percent))}</td>
+    </tr>`).join('');
+    renderPagination('uePagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  window.showDetail = function(idx) {
+    const r = filtered[idx];
+    if (!r) return;
+    const el = document.getElementById('ueDetail');
+    const content = document.getElementById('ueDetailContent');
+    if (!el || !content) return;
+    el.style.display = 'block';
+    content.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+        <div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text2);margin-bottom:12px;">
+            <div><b>${r.product_name || r.nm_id}</b></div>
+            <div style="margin-top:4px;">АРТ: ${r.vendor_code || '—'} | WB ID: ${r.nm_id}</div>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;">
+            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">Выручка</span><span>${fmtMoney(Math.round(r.revenue))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Комиссия WB</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.commission))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Доставка</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.delivery))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Хранение</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.storage))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Штрафы</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.penalty))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Приёмка</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.acceptance))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Эквайринг</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.acquiring))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Реклама</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.ad_spend))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:2px solid var(--accent);font-weight:bold;margin-top:4px;"><span>Чистая прибыль</span><span style="color:${r.net_profit >= 0 ? 'var(--green)' : 'var(--red)'}">${fmtMoney(Math.round(r.net_profit))}</span></div>
+          </div>
+        </div>
+        <div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;">
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">Маржинальность</span><span style="color:${marginColor(r.margin_percent)};font-weight:bold">${r.margin_percent}%</span></div>
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">ROMI</span><span style="color:${r.romi >= 0 ? 'var(--green)' : 'var(--red)'}">${r.ad_spend > 0 ? r.romi + '%' : '—'}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">CPA</span><span>${r.cpa > 0 ? fmtMoney(Math.round(r.cpa)) : '—'}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">Срок окупаемости</span><span>${r.payback_days > 0 ? r.payback_days + ' дней' : '—'}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">LTV (30 дней)</span><span style="color:var(--accent)">${fmtMoney(Math.round(r.ltv_30d))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">Продано (шт)</span><span>${fmt(r.quantity)}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:var(--text2)">Заказы с рекламы</span><span>${fmt(r.ad_orders)}</span></div>
+          </div>
+        </div>
+      </div>
+    `;
+    el.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  window.addEventListener('wb:tab-activated:unit-economics', ueLoad);
+  window.addEventListener('wb:cabinet-changed', () => { if (data.length) { ueFilter(); renderMetrics(); } });
+})();
+</script>

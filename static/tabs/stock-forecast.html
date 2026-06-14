@@ -1,0 +1,142 @@
+<!-- ============================================================
+     TAB: ПРОГНОЗ ОСТАТКОВ
+     ============================================================ -->
+<div id="stockForecastTab">
+  <div class="summary-grid section-mb" id="sfMetrics"></div>
+
+  <div class="card">
+    <div class="section-title">Прогноз остатков на 30 дней</div>
+    <div class="filters">
+      <input class="filter-input" id="sfSearch" placeholder="Артикул / товар..." oninput="sfFilter()">
+      <select class="filter-select" id="sfStatusFilter" onchange="sfFilter()">
+        <option value="">Все статусы</option>
+        <option value="red">Критично (&lt; 7 дней)</option>
+        <option value="yellow">Внимание (7-14 дней)</option>
+        <option value="green">Норма (&gt; 14 дней)</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="sfSort('seller_name')">КАБИНЕТ ↕</th>
+          <th onclick="sfSort('nm_id')">АРТ WB ↕</th>
+          <th onclick="sfSort('vendor_code')">АРТ ПОСТАВЩИКА ↕</th>
+          <th onclick="sfSort('product_name')">ТОВАР ↕</th>
+          <th onclick="sfSort('current_stock')">ОСТАТОК ↕</th>
+          <th onclick="sfSort('velocity')">СКОРОСТЬ/ДЕНЬ ↕</th>
+          <th onclick="sfSort('dos')">DOS ↕</th>
+          <th onclick="sfSort('forecast_date')">ПРОГНОЗ ↕</th>
+          <th>КРИВАЯ</th>
+        </tr></thead>
+        <tbody id="sfBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="sfPagination"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let data = [], filtered = [], page = 1;
+  const PER = 50;
+  let sortCol = 'dos', sortDir = 1;
+
+  async function sfLoad() {
+    document.getElementById('sfBody').innerHTML = '';
+    try {
+      const res = await fetch(`/api/dashboard/stock-forecast?days_back=${WB.period}`);
+      data = await res.json();
+    } catch(e) { data = []; }
+    sfFilter();
+    renderMetrics();
+  }
+  window.sfLoad = sfLoad;
+
+  function sfFilter() {
+    const search = (document.getElementById('sfSearch')?.value || '').toLowerCase();
+    const status = document.getElementById('sfStatusFilter')?.value || '';
+    filtered = data.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (status && r.dos_status !== status) return false;
+      if (search && !`${r.nm_id}`.includes(search) && !`${r.vendor_code||''}`.toLowerCase().includes(search) && !`${r.product_name||''}`.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortData();
+  }
+  window.sfFilter = sfFilter;
+
+  function sfSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = 1; }
+    sortData();
+  }
+  window.sfSort = sfSort;
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) va = sortDir > 0 ? Infinity : -Infinity;
+      if (vb == null) vb = sortDir > 0 ? Infinity : -Infinity;
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return (va - vb) * sortDir;
+    });
+    page = 1;
+    render();
+  }
+
+  function renderMetrics() {
+    const m = document.getElementById('sfMetrics');
+    if (!m) return;
+    const d = WB.cabinet ? data.filter(r => r.cabinet_id === WB.cabinet) : data;
+    const red = d.filter(r => r.dos_status === 'red').length;
+    const yellow = d.filter(r => r.dos_status === 'yellow').length;
+    const green = d.filter(r => r.dos_status === 'green').length;
+    m.innerHTML = `
+      <div class="card metric-card red"><div class="metric-label">КРИТИЧНО</div><div class="metric-value">${red}</div><div class="metric-sub">&lt; 7 дней</div></div>
+      <div class="card metric-card yellow"><div class="metric-label">ВНИМАНИЕ</div><div class="metric-value">${yellow}</div><div class="metric-sub">7-14 дней</div></div>
+      <div class="card metric-card green"><div class="metric-label">НОРМА</div><div class="metric-value">${green}</div><div class="metric-sub">&gt; 14 дней</div></div>
+      <div class="card metric-card teal"><div class="metric-label">ВСЕГО</div><div class="metric-value">${d.length}</div><div class="metric-sub">товаров</div></div>
+    `;
+  }
+
+  function renderSparkline(curve, color) {
+    if (!curve || !curve.length) return '';
+    const max = Math.max(...curve, 1);
+    const w = 80, h = 20;
+    const step = w / (curve.length - 1);
+    const points = curve.map((v, i) => `${i * step},${h - (v / max) * h}`).join(' ');
+    return `<svg width="${w}" height="${h}" style="display:block;"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+  }
+
+  function dosColor(status) {
+    if (status === 'red') return 'var(--red)';
+    if (status === 'yellow') return 'var(--accent2)';
+    return 'var(--green)';
+  }
+
+  function render() {
+    const body = document.getElementById('sfBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:30px;">Нет данных</td></tr>`;
+      document.getElementById('sfPagination').innerHTML = '';
+      return;
+    }
+    body.innerHTML = slice.map(r => `<tr class="fade-in">
+      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
+      <td class="td-mono">${r.nm_id}</td>
+      <td>${r.vendor_code || '—'}</td>
+      <td>${r.product_name || '—'}</td>
+      <td class="td-mono" style="font-weight:bold">${fmt(r.current_stock)}</td>
+      <td class="td-mono">${r.velocity}</td>
+      <td class="td-mono" style="color:${dosColor(r.dos_status)};font-weight:bold">${r.dos} дн</td>
+      <td class="td-mono">${r.forecast_date || '—'}</td>
+      <td>${renderSparkline(r.forecast_curve, dosColor(r.dos_status))}</td>
+    </tr>`).join('');
+    renderPagination('sfPagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  window.addEventListener('wb:tab-activated:stock-forecast', sfLoad);
+  window.addEventListener('wb:cabinet-changed', () => { if (data.length) { sfFilter(); renderMetrics(); } });
+})();
+</script>
