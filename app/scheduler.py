@@ -294,20 +294,25 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
 
                 # Статистика по активным кампаниям (max 50 за раз)
                 active_ids = [c["advertId"] for c in ad_campaigns if c["status"] in (9, 7, 11)][:50]
+                all_details = []
                 if active_ids:
                     # Загружаем детали кампаний (названия и т.д.)
                     for i in range(0, len(active_ids), 50):
                         batch = active_ids[i:i+50]
-                        details = await fetch_ad_campaign_details(token, batch)
+                        details = await fetch_ad_campaign_details(token, batch) or []
+                        all_details.extend(details)
                         for advert in details:
-                            upsert_ad_campaign_detail(db, tid, advert)
+                            if advert:
+                                upsert_ad_campaign_detail(db, tid, advert)
                     db.commit()
 
                     clear_ad_stats(db, tid)
                     for i in range(0, len(active_ids), 50):
                         batch = active_ids[i:i+50]
-                        stats_data = await fetch_ad_stats(token, batch, date_from, date_to)
+                        stats_data = await fetch_ad_stats(token, batch, date_from, date_to) or []
                         for camp_stats in stats_data:
+                            if not camp_stats:
+                                continue
                             aid = camp_stats.get("advertId", 0)
                             upsert_ad_stats(db, tid, aid, period_start, {
                                 "views": camp_stats.get("views", 0),
@@ -335,23 +340,41 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
                 result["ad_stats_camps"] = len(active_ids) if active_ids else 0
                 result["ad_expenses"] = len(expenses)
                 
-                # Поисковые кластеры (для активных кампаний)
+                # Поисковые кластеры: извлекаем advert_id + nm_id из деталей кампаний
                 clusters_count = 0
-                for aid in active_ids[:10]:  # Ограничиваем 10 кампаниями для экономии API-вызовов
-                    try:
-                        clusters = await fetch_ad_search_clusters(token, aid)
-                        clear_ad_search_clusters(db, tid, aid)
-                        for kw in clusters:
-                            upsert_ad_search_cluster(db, tid, aid, kw)
-                            clusters_count += 1
+                try:
+                    cluster_items = []
+                    for advert in all_details:
+                        if not advert:
+                            continue
+                        aid = advert.get("id", 0)
+                        nm_settings = advert.get("nm_settings", []) or []
+                        for ns in nm_settings:
+                            nm_id = ns.get("nm_id")
+                            if nm_id:
+                                cluster_items.append({"advert_id": aid, "nm_id": nm_id})
+                    
+                    if cluster_items:
+                        clusters_data = await fetch_ad_search_clusters(token, cluster_items, date_from, date_to)
+                        seen_aids = set()
+                        for camp_data in clusters_data:
+                            aid = camp_data.get("advert_id", 0)
+                            nm = camp_data.get("nm_id", 0)
+                            if aid not in seen_aids:
+                                clear_ad_search_clusters(db, tid, aid)
+                                seen_aids.add(aid)
+                            for kw in camp_data.get("stats", []):
+                                kw["nm_id"] = nm
+                                upsert_ad_search_cluster(db, tid, aid, kw)
+                                clusters_count += 1
                         db.commit()
-                    except Exception as e:
-                        logger.warning(f"[{name}] Ошибка загрузки кластеров для кампании {aid}: {e}")
+                except Exception as e:
+                    logger.warning(f"[{name}] Ошибка загрузки поисковых кластеров: {e}")
                 result["ad_clusters"] = clusters_count
                 
                 del ad_campaigns
                 gc.collect()
-                logger.info(f"[{name}] Реклама: кампании={result.get('ad_campaigns', 0)}, статистика={result.get('ad_stats_camps', 0)}, затраты={result.get('ad_expenses', 0)}, кластеры={clusters_count}")
+                logger.info(f"[{name}] Реклама: кампании={result.get('ad_campaigns', 0)}, статистика={result.get('ad_stats_camps', 0)}, затраты={result.get('ad_expenses', 0)}")
             except Exception as e:
                 logger.error(f"[{name}] ошибка рекламы: {e}")
 
@@ -392,9 +415,7 @@ async def sync_sales_report_one_cabinet(token: str, name: str) -> dict:
         now = datetime.now(MOSCOW_TZ)
         yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
-        # --- Отчёт реализации (полная перезапись — только вчера) ---
-        logger.info(f"[{name}] очистка отчёта реализации...")
-        clear_sales_report(db, tid)
+        # --- Отчёт реализации (накопление — загружаем только вчера, не очищаем старое) ---
         logger.info(f"[{name}] отчёт реализации за {yesterday}...")
         rows = await fetch_sales_report(token, date_from=yesterday, date_to=yesterday)
 
@@ -423,6 +444,114 @@ async def sync_sales_report_one_cabinet(token: str, name: str) -> dict:
         db.close()
 
     return result
+
+
+# --- BACKFILL SALES REPORT (набор исторических данных) ---
+def run_sales_report_backfill(days: int = 40):
+    """Загрузка отчёта реализации за последние N дней для всех кабинетов.
+    Определяет какие даты уже есть в БД и загружает только недостающие.
+    """
+    from app.models import SalesReport
+    cabinets = get_cabinets_list()
+    if not cabinets:
+        logger.warning("Нет кабинетов для backfill отчёта реализации")
+        return
+
+    logger.info(f"Запуск backfill отчёта реализации за {days} дней для {len(cabinets)} кабинетов")
+
+    async def _run():
+        start_time = datetime.now()
+        now = datetime.now(MOSCOW_TZ)
+        total_rows = 0
+        errors = []
+
+        for cabinet in cabinets:
+            token = cabinet["token"]
+            name = cabinet["name"]
+            tid = token_id(token)
+
+            try:
+                # Определяем какие даты уже есть в БД
+                db = SessionLocal()
+                try:
+                    from sqlalchemy import func as sa_func
+                    existing_dates = set()
+                    rows = db.query(
+                        sa_func.date(SalesReport.sale_dt).label("day")
+                    ).filter(
+                        SalesReport.cabinet_id == tid
+                    ).group_by(sa_func.date(SalesReport.sale_dt)).all()
+                    for r in rows:
+                        existing_dates.add(str(r.day))
+                finally:
+                    db.close()
+
+                # Определяем недостающие даты
+                missing_dates = []
+                for d in range(1, days + 1):
+                    date_str = (now - timedelta(days=d)).strftime("%Y-%m-%d")
+                    if date_str not in existing_dates:
+                        missing_dates.append(date_str)
+
+                if not missing_dates:
+                    logger.info(f"[{name}] все даты за {days} дней уже загружены")
+                    continue
+
+                missing_dates.sort()  # От старых к новым
+                logger.info(f"[{name}] недостающие даты: {len(missing_dates)} ({missing_dates[0]}...{missing_dates[-1]})")
+
+                # Загружаем по 7 дней за раз (лимит API)
+                cabinet_rows = 0
+                for i in range(0, len(missing_dates), 7):
+                    chunk = missing_dates[i:i+7]
+                    date_from = chunk[0]
+                    date_to = chunk[-1]
+
+                    rows = await fetch_sales_report(token, date_from=date_from, date_to=date_to)
+
+                    db = SessionLocal()
+                    try:
+                        for row in rows:
+                            upsert_sales_report_row(db, tid, row)
+                        db.commit()
+                        cabinet_rows += len(rows)
+                        logger.info(f"[{name}] {date_from}..{date_to}: {len(rows)} строк")
+                    finally:
+                        db.close()
+
+                    await asyncio.sleep(65)  # Лимит: 1 запрос в минуту
+
+                total_rows += cabinet_rows
+                logger.info(f"[{name}] backfill завершён: {cabinet_rows} строк")
+
+            except Exception as e:
+                errors.append(f"{name}: {str(e)[:100]}")
+                logger.warning(f"[{name}] ошибка backfill: {e}")
+
+        duration = (datetime.now() - start_time).total_seconds()
+        minutes = int(duration // 60)
+        seconds = int(duration % 60)
+
+        message = f"📊 <b>Backfill отчёта реализации</b>\n"
+        message += f"⏱ Время: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        message += f"⌛️ Длительность: {minutes:02d}:{seconds:02d}\n"
+        message += f"📊 Загружено: {total_rows} строк\n"
+        if errors:
+            message += f"❌ Ошибки: {len(errors)}\n"
+            for e in errors[:5]:
+                message += f"  • {e}\n"
+        else:
+            message += "✅ Все кабинеты обработаны"
+
+        await send_telegram_message(message)
+        logger.info(message)
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.close()
 
 
 # --- RUN ALL (основная цепь) ---
@@ -483,6 +612,102 @@ def run_sync_all():
 
         await send_telegram_message(message)
         logger.info(f"\n{message}")
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.close()
+
+
+# --- SYNC SEARCH CLUSTERS (отдельная цепь) ---
+def run_search_clusters_sync():
+    """Отдельный запуск синхронизации поисковых кластеров."""
+    cabinets = get_cabinets_list()
+    if not cabinets:
+        logger.warning("Нет кабинетов для синхронизации поисковых кластеров")
+        return
+
+    logger.info(f"Запуск синхронизации поисковых кластеров для {len(cabinets)} кабинетов")
+
+    async def _run():
+        start_time = datetime.now()
+        total_clusters = 0
+        errors = []
+
+        for cabinet in cabinets:
+            token = cabinet["token"]
+            name = cabinet["name"]
+            tid = token_id(token)
+            try:
+                now = datetime.now(MOSCOW_TZ)
+                date_to = now.strftime("%Y-%m-%d")
+                date_from = (now - timedelta(days=9)).strftime("%Y-%m-%d")
+
+                campaigns = await fetch_ad_campaigns(token)
+                if not campaigns:
+                    continue
+
+                advert_ids = [c["advertId"] for c in campaigns]
+                details = await fetch_ad_campaign_details(token, advert_ids)
+
+                cluster_items = []
+                for advert in details:
+                    if not advert:
+                        continue
+                    aid = advert.get("id", 0)
+                    for ns in (advert.get("nm_settings") or []):
+                        nm_id = ns.get("nm_id")
+                        if nm_id:
+                            cluster_items.append({"advert_id": aid, "nm_id": nm_id})
+
+                if not cluster_items:
+                    continue
+
+                clusters_data = await fetch_ad_search_clusters(token, cluster_items, date_from, date_to)
+                db = SessionLocal()
+                try:
+                    seen_aids = set()
+                    count = 0
+                    for camp_data in clusters_data:
+                        aid = camp_data.get("advert_id", 0)
+                        nm = camp_data.get("nm_id", 0)
+                        if aid not in seen_aids:
+                            clear_ad_search_clusters(db, tid, aid)
+                            seen_aids.add(aid)
+                        for kw in camp_data.get("stats", []):
+                            kw["nm_id"] = nm
+                            upsert_ad_search_cluster(db, tid, aid, kw)
+                            count += 1
+                    db.commit()
+                    total_clusters += count
+                    logger.info(f"[{name}] Поисковые кластеры: {count} записей")
+                finally:
+                    db.close()
+
+                await asyncio.sleep(2)
+            except Exception as e:
+                errors.append(f"{name}: {str(e)[:100]}")
+                logger.warning(f"[{name}] Ошибка поисковых кластеров: {e}")
+
+        duration = (datetime.now() - start_time).total_seconds()
+        minutes = int(duration // 60)
+        seconds = int(duration % 60)
+
+        message = f"🔍 <b>Поисковые кластеры WB</b>\n"
+        message += f"⏱ Время: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        message += f"⌛️ Длительность: {minutes:02d}:{seconds:02d}\n"
+        message += f"📊 Записей: {total_clusters}\n"
+        if errors:
+            message += f"❌ Ошибки: {len(errors)}\n"
+            for e in errors[:5]:
+                message += f"  • {e}\n"
+        else:
+            message += "✅ Все кабинеты обработаны"
+
+        await send_telegram_message(message)
+        logger.info(message)
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

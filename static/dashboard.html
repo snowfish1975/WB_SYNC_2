@@ -46,6 +46,11 @@
 
     <button class="sync-btn" onclick="triggerSync()">⟳ СИНХР</button>
     <div class="last-sync" id="lastSync">—</div>
+
+    <div class="user-info" id="userInfo" style="display:none">
+      <span class="user-name" id="userName"></span>
+      <a href="/logout" class="logout-btn" title="Выйти">⏻</a>
+    </div>
   </div>
 </header>
 
@@ -66,6 +71,8 @@
   <button class="tab-btn" data-tab="stock-forecast" onclick="switchTab('stock-forecast')">📉 Прогноз</button>
   <button class="tab-btn" data-tab="unit-economics" onclick="switchTab('unit-economics')">💰 Юнит-экономика</button>
   <button class="tab-btn" data-tab="search-clusters" onclick="switchTab('search-clusters')">🔍 Поиск</button>
+  <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')">👤 Профиль</button>
+  <button class="tab-btn" data-tab="admin" onclick="switchTab('admin')" id="adminTab" style="display:none">⚙ Управление</button>
 </nav>
 
 <!-- ============ КОНТЕНТ ТАБОВ ============ -->
@@ -85,12 +92,53 @@
   <div id="tab-stock-forecast" class="tab-content"></div>
   <div id="tab-unit-economics" class="tab-content"></div>
   <div id="tab-search-clusters" class="tab-content"></div>
+  <div id="tab-profile" class="tab-content"></div>
+  <div id="tab-admin" class="tab-content"></div>
 </div>
 
 <script src="/static/js/tabs.js?v=3"></script>
 <script>
-  // Загружаем последнюю синхронизацию при старте
   document.addEventListener('DOMContentLoaded', loadLastSync);
+
+  fetch('/api/auth/me').then(r => r.json()).then(user => {
+    if (user.id) {
+      document.getElementById('userInfo').style.display = 'flex';
+      document.getElementById('userName').textContent = user.full_name || user.username;
+      if (user.is_admin) {
+        document.getElementById('adminTab').style.display = '';
+      }
+      window.WB.user = user;
+    }
+  }).catch(() => {});
+
+  window.logout = function() { window.location.href = '/logout'; };
 </script>
+<style>
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+}
+.user-name {
+  font-size: 12px;
+  color: var(--text2);
+  font-family: 'IBM Plex Mono', monospace;
+}
+.logout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(255,71,87,0.12);
+  color: #ff4757;
+  text-decoration: none;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+.logout-btn:hover { background: rgba(255,71,87,0.25); }
+</style>
 </body>
 </html>

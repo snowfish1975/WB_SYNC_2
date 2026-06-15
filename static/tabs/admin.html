@@ -1,0 +1,223 @@
+<!-- ============================================================
+     TAB: УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ (Admin)
+     ============================================================ -->
+<div id="adminTabContent">
+  <div class="card section-mb">
+    <div class="section-title">Новый пользователь</div>
+    <form id="newUserForm" class="profile-form" onsubmit="return createUser(event)">
+      <div class="two-col">
+        <div class="form-group">
+          <label>Логин *</label>
+          <input type="text" id="nuUsername" class="filter-input" required>
+        </div>
+        <div class="form-group">
+          <label>Пароль *</label>
+          <input type="password" id="nuPassword" class="filter-input" required>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="form-group">
+          <label>ФИО</label>
+          <input type="text" id="nuFullName" class="filter-input">
+        </div>
+        <div class="form-group">
+          <label>Компания</label>
+          <input type="text" id="nuCompany" class="filter-input">
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="form-group">
+          <label>Телефон</label>
+          <input type="text" id="nuPhone" class="filter-input">
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="text" id="nuEmail" class="filter-input">
+        </div>
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" id="nuIsAdmin"> Администратор</label>
+      </div>
+      <button type="submit" class="sync-btn" style="background:var(--accent);color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;">Создать</button>
+      <span id="nuMsg" style="margin-left:12px;font-size:12px;color:var(--green)"></span>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Пользователи</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>ЛОГИН</th>
+          <th>ФИО</th>
+          <th>КОМПАНИЯ</th>
+          <th>ТЕЛЕФОН</th>
+          <th>СТАТУС</th>
+          <th>РОЛЬ</th>
+          <th>КАБИНЕТЫ</th>
+          <th>ДЕЙСТВИЯ</th>
+        </tr></thead>
+        <tbody id="adminUsersBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<style>
+.admin-actions { display: flex; gap: 4px; }
+.admin-btn {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text2);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.admin-btn:hover { border-color: var(--accent); color: var(--accent); }
+.admin-btn.danger:hover { border-color: var(--red); color: var(--red); }
+.status-active { color: #44cf6c; }
+.status-inactive { color: #ff4757; }
+.role-admin { color: #ffc107; }
+.role-user { color: var(--text3); }
+.admin-cab-modal {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6); z-index: 200;
+  display: flex; align-items: center; justify-content: center;
+}
+.admin-cab-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+  padding: 24px; width: 500px; max-height: 80vh; overflow-y: auto;
+}
+.admin-cab-card .section-title { margin-bottom: 16px; }
+.cab-checkbox { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.cab-checkbox input { accent-color: var(--accent); }
+</style>
+
+<script>
+(function() {
+  let usersData = [];
+  let allCabinets = [];
+
+  async function loadUsers() {
+    const resp = await fetch('/api/admin/users');
+    usersData = await resp.json();
+    renderUsers();
+  }
+
+  async function loadCabs() {
+    const resp = await fetch('/api/dashboard/cabinets');
+    allCabinets = await resp.json();
+  }
+
+  function renderUsers() {
+    const body = document.getElementById('adminUsersBody');
+    if (!body) return;
+    body.innerHTML = usersData.map(u => `<tr>
+      <td class="td-mono">${esc(u.username)}</td>
+      <td>${esc(u.full_name)}</td>
+      <td>${esc(u.company)}</td>
+      <td>${esc(u.phone)}</td>
+      <td><span class="${u.is_active ? 'status-active' : 'status-inactive'}">${u.is_active ? 'Активен' : 'Заблокирован'}</span></td>
+      <td><span class="${u.is_admin ? 'role-admin' : 'role-user'}">${u.is_admin ? 'Админ' : 'Пользователь'}</span></td>
+      <td style="font-size:11px">${Array.isArray(u.cabinets) ? u.cabinets.join(', ') : u.cabinets}</td>
+      <td><div class="admin-actions">
+        <button class="admin-btn" onclick="editCabinets(${u.id})">Кабинеты</button>
+        <button class="admin-btn" onclick="toggleUser(${u.id}, ${!u.is_active})">${u.is_active ? 'Блок' : 'Актив'}</button>
+        <button class="admin-btn" onclick="resetPassword(${u.id})">Пароль</button>
+        ${u.username !== 'wbuser' ? `<button class="admin-btn danger" onclick="deleteUser(${u.id})">Удалить</button>` : ''}
+      </div></td>
+    </tr>`).join('');
+  }
+
+  window.createUser = async function(e) {
+    e.preventDefault();
+    const fd = new FormData();
+    fd.append('username', document.getElementById('nuUsername').value);
+    fd.append('password', document.getElementById('nuPassword').value);
+    fd.append('full_name', document.getElementById('nuFullName').value);
+    fd.append('company', document.getElementById('nuCompany').value);
+    fd.append('phone', document.getElementById('nuPhone').value);
+    fd.append('email', document.getElementById('nuEmail').value);
+    fd.append('is_admin', document.getElementById('nuIsAdmin').checked);
+    const resp = await fetch('/api/admin/users', { method: 'POST', body: fd });
+    const msg = document.getElementById('nuMsg');
+    if (resp.ok) { msg.textContent = '✓ Создан'; document.getElementById('newUserForm').reset(); loadUsers(); setTimeout(() => msg.textContent = '', 3000); }
+    else { const d = await resp.json(); msg.style.color = 'var(--red)'; msg.textContent = d.error || 'Ошибка'; setTimeout(() => { msg.textContent = ''; msg.style.color = 'var(--green)'; }, 3000); }
+  };
+
+  window.toggleUser = async function(id, active) {
+    const fd = new FormData();
+    fd.append('is_active', active);
+    await fetch(`/api/admin/users/${id}`, { method: 'PUT', body: fd });
+    loadUsers();
+  };
+
+  window.resetPassword = async function(id) {
+    const pw = prompt('Новый пароль для пользователя:');
+    if (!pw) return;
+    const fd = new FormData();
+    fd.append('password', pw);
+    await fetch(`/api/admin/users/${id}`, { method: 'PUT', body: fd });
+    alert('Пароль обновлён');
+  };
+
+  window.deleteUser = async function(id) {
+    if (!confirm('Удалить пользователя?')) return;
+    await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+    loadUsers();
+  };
+
+  window.editCabinets = function(userId) {
+    const user = usersData.find(u => u.id === userId);
+    if (!user) return;
+    const hasAll = user.cabinets === 'all';
+    const selected = Array.isArray(user.cabinets) ? [] : (hasAll ? allCabinets.map(c => c.cabinet_id) : []);
+
+    let html = `<div class="admin-cab-card">
+      <div class="section-title">Кабинеты: ${esc(user.username)}</div>
+      <div class="cab-checkbox"><input type="checkbox" id="cabAll" ${hasAll || !Array.isArray(user.cabinets) ? 'checked' : ''} onchange="toggleCabAll()"><label for="cabAll">Все кабинеты</label></div>
+      <hr style="border-color:var(--border);margin:8px 0">`;
+    allCabinets.forEach(c => {
+      const checked = hasAll || selected.includes(c.cabinet_id);
+      html += `<div class="cab-checkbox"><input type="checkbox" class="cab-check" value="${c.cabinet_id}" ${checked ? 'checked' : ''}><label>${esc(c.seller_name)}</label></div>`;
+    });
+    html += `<div style="margin-top:16px;display:flex;gap:8px">
+      <button class="sync-btn" style="background:var(--accent);color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;" onclick="saveCabinets(${userId})">Сохранить</button>
+      <button class="admin-btn" onclick="closeCabModal()">Отмена</button>
+    </div></div>`;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'admin-cab-modal';
+    overlay.id = 'cabModal';
+    overlay.innerHTML = html;
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+    document.body.appendChild(overlay);
+  };
+
+  window.toggleCabAll = function() {
+    const all = document.getElementById('cabAll').checked;
+    document.querySelectorAll('.cab-check').forEach(cb => cb.checked = all);
+  };
+
+  window.saveCabinets = async function(userId) {
+    const all = document.getElementById('cabAll').checked;
+    const fd = new FormData();
+    fd.append('access_all', all);
+    if (!all) {
+      const ids = [...document.querySelectorAll('.cab-check:checked')].map(cb => cb.value).join(',');
+      fd.append('cabinet_ids', ids);
+    }
+    await fetch(`/api/admin/users/${userId}/cabinets`, { method: 'POST', body: fd });
+    document.getElementById('cabModal').remove();
+    loadUsers();
+  };
+
+  window.closeCabModal = function() { document.getElementById('cabModal').remove(); };
+
+  function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+
+  window.addEventListener('wb:tab-activated:admin', () => { loadUsers(); loadCabs(); });
+})();
+</script>

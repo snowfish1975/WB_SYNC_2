@@ -1024,23 +1024,43 @@ def clear_ad_search_clusters(db: Session, cabinet_id: str, advert_id: int):
     db.commit()
 
 def upsert_ad_search_cluster(db: Session, cabinet_id: str, advert_id: int, keyword_data: dict):
+    nm_id = keyword_data.get("nm_id", 0)
     stmt = pg_insert(AdSearchCluster).values(
         cabinet_id=cabinet_id,
         advert_id=advert_id,
-        keyword=keyword_data.get("keyword", ""),
+        nm_id=nm_id,
+        keyword=keyword_data.get("norm_query", keyword_data.get("keyword", "")),
         cluster_id=keyword_data.get("clusterId"),
         bids=keyword_data.get("bids", 0),
         views=keyword_data.get("views", 0),
         clicks=keyword_data.get("clicks", 0),
         ctr=keyword_data.get("ctr", 0),
         cpc=keyword_data.get("cpc", 0),
-        sum_price=keyword_data.get("sum", 0),
+        cpm=keyword_data.get("cpm", 0),
+        avg_pos=keyword_data.get("avg_pos", keyword_data.get("avgPos", 0)),
+        atbs=keyword_data.get("atbs", 0),
+        shks=keyword_data.get("shks", 0),
+        sum_price=keyword_data.get("sum_price", keyword_data.get("sum", 0)),
         orders=keyword_data.get("orders", 0),
         spend=keyword_data.get("spend", 0),
         raw_data=keyword_data,
     ).on_conflict_do_update(
         constraint="uq_ad_search_cluster",
-        set_={"views": pg_insert(AdSearchCluster).excluded.views, "clicks": pg_insert(AdSearchCluster).excluded.clicks, "ctr": pg_insert(AdSearchCluster).excluded.ctr, "cpc": pg_insert(AdSearchCluster).excluded.cpc, "sum_price": pg_insert(AdSearchCluster).excluded.sum_price, "orders": pg_insert(AdSearchCluster).excluded.orders, "spend": pg_insert(AdSearchCluster).excluded.spend, "raw_data": pg_insert(AdSearchCluster).excluded.raw_data, "synced_at": datetime.utcnow()},
+        set_={
+            "views": pg_insert(AdSearchCluster).excluded.views,
+            "clicks": pg_insert(AdSearchCluster).excluded.clicks,
+            "ctr": pg_insert(AdSearchCluster).excluded.ctr,
+            "cpc": pg_insert(AdSearchCluster).excluded.cpc,
+            "cpm": pg_insert(AdSearchCluster).excluded.cpm,
+            "avg_pos": pg_insert(AdSearchCluster).excluded.avg_pos,
+            "atbs": pg_insert(AdSearchCluster).excluded.atbs,
+            "shks": pg_insert(AdSearchCluster).excluded.shks,
+            "sum_price": pg_insert(AdSearchCluster).excluded.sum_price,
+            "orders": pg_insert(AdSearchCluster).excluded.orders,
+            "spend": pg_insert(AdSearchCluster).excluded.spend,
+            "raw_data": pg_insert(AdSearchCluster).excluded.raw_data,
+            "synced_at": datetime.utcnow(),
+        },
     )
     db.execute(stmt)
 
@@ -1257,18 +1277,15 @@ def get_unit_economics(db: Session, cabinet_id: str | None = None, days_back: in
 
         revenue = report["revenue"]
         for_pay = report["for_pay"]
-        # Расширенная формула: учёт всех скрытых расходов и доходов
-        total_expenses = (
-            report["delivery"] + report["storage"] + report["penalty"] +
-            report["acceptance"] + report["acquiring"] + ad_spend +
-            report["deduction"] + report["rebill_logistic"] + report["dlv_prc"]
-        )
-        total_income = report["reward"]  # Вознаграждение от WB
-        net_profit = for_pay + total_income - total_expenses
+        # for_pay = что WB платит продавцу (уже за вычетом комиссий, доставки, хранения, штрафов, приёмки, эквайринга)
+        # reward = бонус от WB (сверх for_pay)
+        net_profit = for_pay + report["reward"] - ad_spend
         margin_percent = round((net_profit / revenue * 100), 1) if revenue > 0 else 0
 
-        romi = round(((net_profit - ad_spend) / ad_spend * 100), 1) if ad_spend > 0 else 0
-        cpa = round(ad_spend / ad_orders, 0) if ad_orders > 0 else 0
+        ROMI_THRESHOLD = 100  # ROMI считается достоверным только при ad_spend >= этого порога
+        romi_valid = ad_spend >= ROMI_THRESHOLD
+        romi = round(((net_profit - ad_spend) / ad_spend * 100), 1) if romi_valid else None
+        cpa = round(ad_spend / ad_orders, 0) if ad_orders > 0 else None
 
         daily_profit = net_profit / days_back if days_back > 0 else 0
         payback_days = round(ad_spend / daily_profit, 1) if daily_profit > 0 else 0
@@ -1303,6 +1320,7 @@ def get_unit_economics(db: Session, cabinet_id: str | None = None, days_back: in
             "net_profit": net_profit,
             "margin_percent": margin_percent,
             "romi": romi,
+            "romi_valid": romi_valid,
             "cpa": cpa,
             "payback_days": payback_days,
             "ltv_30d": ltv_30d,

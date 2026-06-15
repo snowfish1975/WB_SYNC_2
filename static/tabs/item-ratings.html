@@ -136,6 +136,7 @@
   }
 
   window.addEventListener('wb:tab-activated:item-ratings', irLoad);
+  window.addEventListener('wb:period-changed', () => { if (data.length) irLoad(); });
   window.addEventListener('wb:cabinet-changed', () => { if (data.length) { irFilter(); renderMetrics(); } });
 })();
 </script>

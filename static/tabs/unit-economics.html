@@ -146,8 +146,8 @@
       <td class="td-mono">${fmtMoney(Math.round(r.for_pay))}</td>
       <td class="td-mono" style="color:${r.net_profit >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:bold">${fmtMoney(Math.round(r.net_profit))}</td>
       <td class="td-mono" style="color:${marginColor(r.margin_percent)};font-weight:bold">${r.margin_percent}%</td>
-      <td class="td-mono">${r.ad_spend > 0 ? r.romi + '%' : '—'}</td>
-      <td class="td-mono">${r.cpa > 0 ? fmtMoney(Math.round(r.cpa)) : '—'}</td>
+      <td class="td-mono" style="color:${r.romi_valid ? (r.romi >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text3)'}">${r.romi_valid ? r.romi + '%' : '—'}</td>
+      <td class="td-mono">${r.cpa != null ? fmtMoney(Math.round(r.cpa)) : '—'}</td>
       <td class="td-mono">${r.payback_days > 0 ? r.payback_days + ' дн' : '—'}</td>
       <td>${renderSparkline(r.profit_curve, marginColor(r.margin_percent))}</td>
     </tr>`).join('');
@@ -170,29 +170,26 @@
           </div>
           <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;">
             <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">Выручка</span><span>${fmtMoney(Math.round(r.revenue))}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Комиссия WB</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.commission))}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Доставка</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.delivery))}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Хранение</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.storage))}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Штрафы</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.penalty))}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Приёмка</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.acceptance))}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Эквайринг</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.acquiring))}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Вычеты</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.deduction))}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Логистика (перебалансировка)</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.rebill_logistic))}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Доставка %</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.dlv_prc))}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">- Реклама</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.ad_spend))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">К зачёту (for_pay)</span><span>${fmtMoney(Math.round(r.for_pay))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">(комиссия, доставка, хранение, штрафы, приёмка, эквайринг — уже вычтены WB)</span><span></span></div>
             <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--green)">+ Вознаграждение WB</span><span style="color:var(--green)">+${fmtMoney(Math.round(r.reward))}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);"><span style="color:var(--red)">- Реклама</span><span style="color:var(--red)">-${fmtMoney(Math.round(r.ad_spend))}</span></div>
             <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:2px solid var(--accent);font-weight:bold;margin-top:4px;"><span>Чистая прибыль</span><span style="color:${r.net_profit >= 0 ? 'var(--green)' : 'var(--red)'}">${fmtMoney(Math.round(r.net_profit))}</span></div>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text3);margin-top:8px;">
+            Компоненты WB-отчёта (информационные):<br>
+            Комиссия: ${fmtMoney(Math.round(r.commission))} | Доставка: ${fmtMoney(Math.round(r.delivery))} | Хранение: ${fmtMoney(Math.round(r.storage))} | Штрафы: ${fmtMoney(Math.round(r.penalty))} | Приёмка: ${fmtMoney(Math.round(r.acceptance))} | Эквайринг: ${fmtMoney(Math.round(r.acquiring))}
           </div>
         </div>
         <div>
           <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;">
             <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">Маржинальность</span><span style="color:${marginColor(r.margin_percent)};font-weight:bold">${r.margin_percent}%</span></div>
-            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">ROMI</span><span style="color:${r.romi >= 0 ? 'var(--green)' : 'var(--red)'}">${r.ad_spend > 0 ? r.romi + '%' : '—'}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">CPA</span><span>${r.cpa > 0 ? fmtMoney(Math.round(r.cpa)) : '—'}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">ROMI</span><span style="color:${r.romi_valid ? (r.romi >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text3)'}">${r.romi_valid ? r.romi + '%' : '— (мало данных)'}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">CPA</span><span>${r.cpa != null ? fmtMoney(Math.round(r.cpa)) : '—'}</span></div>
             <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">Срок окупаемости</span><span>${r.payback_days > 0 ? r.payback_days + ' дней' : '—'}</span></div>
             <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">LTV (30 дней)</span><span style="color:var(--accent)">${fmtMoney(Math.round(r.ltv_30d))}</span></div>
             <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:var(--text2)">Продано (шт)</span><span>${fmt(r.quantity)}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:var(--text2)">Заказы с рекламы</span><span>${fmt(r.ad_orders)}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:var(--text2)">Заказы с рекламы</span><span>${r.ad_orders || 0}</span></div>
           </div>
         </div>
       </div>
@@ -201,6 +198,7 @@
   };
 
   window.addEventListener('wb:tab-activated:unit-economics', ueLoad);
+  window.addEventListener('wb:period-changed', () => { if (data.length) ueLoad(); });
   window.addEventListener('wb:cabinet-changed', () => { if (data.length) { ueFilter(); renderMetrics(); } });
 })();
 </script>

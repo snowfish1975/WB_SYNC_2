@@ -3,7 +3,8 @@ import asyncio
 import hashlib
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, Query
+from fastapi import FastAPI, Depends, Query, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
@@ -30,10 +31,15 @@ from app.crud import (
     get_stock_forecast, get_unit_economics,
     get_ad_search_clusters,
 )
-from app.models import User, ApiKey, WbToken
+from app.models import User, ApiKey, WbToken, UserCabinetAccess
 from app.models import ProductCharacteristic, Stock, Order, Price, SalesReport, Sale
 from app.models import ShelfMetric, FunnelMetric, StockByOffice, ItemRating, AdCampaign, AdCampaignStats, AdExpense, AdSearchCluster
-from app.scheduler import run_sync_all, run_sales_report_sync
+from app.scheduler import run_sync_all, run_sales_report_sync, run_search_clusters_sync, run_sales_report_backfill
+from app.auth import (
+    hash_password, verify_password, check_rate_limit, record_failed_login, clear_rate_limit,
+    get_current_user, login_required, admin_required, get_user_cabinet_ids,
+    SESSION_KEY_USER_ID, SESSION_KEY_IS_ADMIN,
+)
 
 from fastapi.responses import JSONResponse
 
@@ -82,15 +88,353 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="WB Sync API", description="Синхронизация данных Wildberries", lifespan=lifespan)
 
+from starlette.middleware.sessions import SessionMiddleware
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "wb-sync-secret-key-change-in-production"), session_cookie="wb_session", max_age=86400 * 7, same_site="strict", https_only=False)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.get("/dashboard")
-def dashboard():
-    return FileResponse("static/dashboard.html")
+
+def _get_user_cabinets(request: Request, db: Session) -> list[str] | None:
+    """Get allowed cabinet_ids for current user. None = all, [] = none."""
+    uid = request.session.get(SESSION_KEY_USER_ID)
+    if not uid:
+        return []
+    user = db.query(User).filter(User.id == uid).first()
+    if not user or not user.is_active:
+        return []
+    return get_user_cabinet_ids(user, db)
+
+
+def _filter_by_cabinets(query, allowed: list[str] | None, cabinet_col):
+    """Apply cabinet filter to a SQLAlchemy query. allowed=None means no filter."""
+    if allowed is not None:
+        query = query.filter(cabinet_col.in_(allowed))
+    return query
+
+
+# =====================
+# AUTH: LOGIN / LOGOUT
+# =====================
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    if request.session.get(SESSION_KEY_USER_ID):
+        return RedirectResponse("/dashboard", status_code=302)
+    return FileResponse("static/login.html")
+
+
+@app.post("/login")
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    client_ip = request.client.host if request.client else "unknown"
+
+    if not check_rate_limit(client_ip):
+        return HTMLResponse(
+            '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ошибка</title>'
+            '<link rel="stylesheet" href="/static/themes.css?v=3"><link rel="stylesheet" href="/static/base.css?v=3">'
+            '</head><body data-theme="dark"><div style="max-width:400px;margin:120px auto;text-align:center;">'
+            '<h2 style="color:var(--red)">Слишком много попыток</h2>'
+            '<p style="color:var(--text2)">Подождите 5 минут и попробуйте снова.</p>'
+            '<a href="/login" style="color:var(--accent)">← Назад</a></div></body></html>',
+            status_code=429,
+        )
+
+    user = get_user_by_username(db, username)
+    if not user or not user.password_hash or not verify_password(password, user.password_hash):
+        record_failed_login(client_ip)
+        return HTMLResponse(
+            '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ошибка</title>'
+            '<link rel="stylesheet" href="/static/themes.css?v=3"><link rel="stylesheet" href="/static/base.css?v=3">'
+            '</head><body data-theme="dark"><div style="max-width:400px;margin:120px auto;text-align:center;">'
+            '<h2 style="color:var(--red)">Неверный логин или пароль</h2>'
+            '<a href="/login" style="color:var(--accent)">← Попробовать снова</a></div></body></html>',
+            status_code=401,
+        )
+
+    if not user.is_active:
+        return HTMLResponse(
+            '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ошибка</title>'
+            '<link rel="stylesheet" href="/static/themes.css?v=3"><link rel="stylesheet" href="/static/base.css?v=3">'
+            '</head><body data-theme="dark"><div style="max-width:400px;margin:120px auto;text-align:center;">'
+            '<h2 style="color:var(--red)">Аккаунт деактивирован</h2>'
+            '<p style="color:var(--text2)">Обратитесь к администратору.</p>'
+            '<a href="/login" style="color:var(--accent)">← Назад</a></div></body></html>',
+            status_code=403,
+        )
+
+    clear_rate_limit(client_ip)
+    request.session[SESSION_KEY_USER_ID] = user.id
+    request.session[SESSION_KEY_IS_ADMIN] = user.is_admin
+    return RedirectResponse("/dashboard", status_code=302)
+
+
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/login", status_code=302)
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request, db: Session = Depends(get_db)):
+    uid = request.session.get(SESSION_KEY_USER_ID)
+    if not uid:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    user = db.query(User).filter(User.id == uid).first()
+    if not user or not user.is_active:
+        request.session.clear()
+        return JSONResponse(status_code=401, content={"error": "User not found"})
+    return {
+        "id": user.id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "company": user.company,
+        "phone": user.phone,
+        "email": user.email,
+        "is_admin": user.is_admin,
+    }
+
 
 @app.get("/")
-def root():
-    return {"status": "ok", "message": "WB Sync работает"}
+def root(request: Request):
+    uid = request.session.get(SESSION_KEY_USER_ID)
+    if uid:
+        return RedirectResponse("/dashboard", status_code=302)
+    return RedirectResponse("/login", status_code=302)
+
+
+@app.get("/dashboard")
+def dashboard(request: Request, db: Session = Depends(get_db)):
+    uid = request.session.get(SESSION_KEY_USER_ID)
+    if not uid:
+        return RedirectResponse("/login", status_code=302)
+    user = db.query(User).filter(User.id == uid).first()
+    if not user or not user.is_active:
+        request.session.clear()
+        return RedirectResponse("/login", status_code=302)
+    return FileResponse("static/dashboard.html")
+
+
+# =====================
+# USER MANAGEMENT (Admin)
+# =====================
+
+@app.get("/api/admin/users")
+def admin_list_users(request: Request, db: Session = Depends(get_db)):
+    uid = request.session.get(SESSION_KEY_USER_ID)
+    if not uid:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    user = db.query(User).filter(User.id == uid).first()
+    if not user or not user.is_admin:
+        return JSONResponse(status_code=403, content={"error": "Admin access required"})
+
+    users = db.query(User).all()
+    mapping = load_token_mapping()
+    result = []
+    for u in users:
+        cab_access = db.query(UserCabinetAccess).filter(UserCabinetAccess.user_id == u.id).all()
+        if u.is_admin:
+            cabinets = "all"
+        elif not cab_access:
+            cabinets = "none"
+        elif any(r.access_all for r in cab_access):
+            cabinets = "all"
+        else:
+            cabinets = [mapping.get(r.cabinet_id, r.cabinet_id[:8]) for r in cab_access]
+        result.append({
+            "id": u.id,
+            "username": u.username,
+            "full_name": u.full_name or "",
+            "company": u.company or "",
+            "phone": u.phone or "",
+            "email": u.email or "",
+            "is_active": u.is_active,
+            "is_admin": u.is_admin,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "cabinets": cabinets,
+        })
+    return result
+
+
+@app.post("/api/admin/users")
+def admin_create_user(
+    request: Request,
+    username: str = Form(...),
+    full_name: str = Form(""),
+    company: str = Form(""),
+    phone: str = Form(""),
+    email: str = Form(""),
+    password: str = Form(...),
+    is_admin: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    uid = request.session.get(SESSION_KEY_USER_ID)
+    if not uid:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    admin = db.query(User).filter(User.id == uid).first()
+    if not admin or not admin.is_admin:
+        return JSONResponse(status_code=403, content={"error": "Admin access required"})
+
+    existing = get_user_by_username(db, username)
+    if existing:
+        return JSONResponse(status_code=400, content={"error": "Username already exists"})
+
+    user = create_user(db, username=username, email=email or None, password_hash=hash_password(password))
+    user.full_name = full_name
+    user.company = company
+    user.phone = phone
+    user.is_admin = is_admin
+    db.commit()
+    return JSONResponse(content={"id": user.id, "username": user.username, "status": "created"})
+
+
+@app.put("/api/admin/users/{user_id}")
+def admin_update_user(
+    user_id: int,
+    request: Request,
+    full_name: str = Form(None),
+    company: str = Form(None),
+    phone: str = Form(None),
+    email: str = Form(None),
+    is_active: bool = Form(None),
+    is_admin: bool = Form(None),
+    password: str = Form(None),
+    db: Session = Depends(get_db),
+):
+    uid = request.session.get(SESSION_KEY_USER_ID)
+    if not uid:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    admin = db.query(User).filter(User.id == uid).first()
+    if not admin or not admin.is_admin:
+        return JSONResponse(status_code=403, content={"error": "Admin access required"})
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+
+    if full_name is not None:
+        user.full_name = full_name
+    if company is not None:
+        user.company = company
+    if phone is not None:
+        user.phone = phone
+    if email is not None:
+        user.email = email
+    if is_active is not None:
+        user.is_active = is_active
+    if is_admin is not None:
+        user.is_admin = is_admin
+    if password:
+        user.password_hash = hash_password(password)
+    db.commit()
+    return JSONResponse(content={"status": "updated"})
+
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    uid = request.session.get(SESSION_KEY_USER_ID)
+    if not uid:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    admin = db.query(User).filter(User.id == uid).first()
+    if not admin or not admin.is_admin:
+        return JSONResponse(status_code=403, content={"error": "Admin access required"})
+    if user_id == uid:
+        return JSONResponse(status_code=400, content={"error": "Cannot delete yourself"})
+
+    success = delete_user(db, user_id)
+    if not success:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    return JSONResponse(content={"status": "deleted"})
+
+
+@app.post("/api/admin/users/{user_id}/cabinets")
+def admin_set_user_cabinets(
+    user_id: int,
+    request: Request,
+    cabinet_ids: str = Form(""),
+    access_all: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    uid = request.session.get(SESSION_KEY_USER_ID)
+    if not uid:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    admin = db.query(User).filter(User.id == uid).first()
+    if not admin or not admin.is_admin:
+        return JSONResponse(status_code=403, content={"error": "Admin access required"})
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+
+    db.query(UserCabinetAccess).filter(UserCabinetAccess.user_id == user_id).delete()
+
+    if access_all:
+        db.add(UserCabinetAccess(user_id=user_id, cabinet_id="*", access_all=True))
+    elif cabinet_ids:
+        for cid in cabinet_ids.split(","):
+            cid = cid.strip()
+            if cid:
+                db.add(UserCabinetAccess(user_id=user_id, cabinet_id=cid))
+    db.commit()
+    return JSONResponse(content={"status": "updated"})
+
+
+# =====================
+# USER PROFILE (Self-service)
+# =====================
+
+@app.put("/api/profile")
+def update_profile(
+    request: Request,
+    full_name: str = Form(None),
+    company: str = Form(None),
+    phone: str = Form(None),
+    db: Session = Depends(get_db),
+):
+    uid = request.session.get(SESSION_KEY_USER_ID)
+    if not uid:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    user = db.query(User).filter(User.id == uid).first()
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+
+    if full_name is not None:
+        user.full_name = full_name
+    if company is not None:
+        user.company = company
+    if phone is not None:
+        user.phone = phone
+    db.commit()
+    return JSONResponse(content={"status": "updated"})
+
+
+@app.put("/api/profile/password")
+def change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    uid = request.session.get(SESSION_KEY_USER_ID)
+    if not uid:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    user = db.query(User).filter(User.id == uid).first()
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+
+    if not user.password_hash or not verify_password(current_password, user.password_hash):
+        return JSONResponse(status_code=400, content={"error": "Current password is incorrect"})
+
+    user.password_hash = hash_password(new_password)
+    db.commit()
+    return JSONResponse(content={"status": "updated"})
 
 
 @app.post("/api/products", response_model=list[ProductCharacteristicOut])
@@ -372,35 +716,54 @@ def trigger_sales_report_sync():
     return {"status": "started"}
 
 
+@app.post("/api/sync/trigger-search-clusters")
+def trigger_search_clusters_sync():
+    """Принудительный запуск синхронизации поисковых кластеров."""
+    import threading
+    threading.Thread(target=run_search_clusters_sync, daemon=True).start()
+    return {"status": "started"}
+
+
+@app.post("/api/sync/trigger-sales-report-backfill")
+def trigger_sales_report_backfill(days: int = Query(40, ge=1, le=90)):
+    """Загрузка отчёта реализации за последние N дней (backfill исторических данных)."""
+    import threading
+    threading.Thread(target=run_sales_report_backfill, args=(days,), daemon=True).start()
+    return {"status": "started", "days": days}
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
 
 
 @app.get("/api/dashboard/cabinets")
-def dashboard_cabinets():
-    """Список всех активных кабинетов из БД."""
+def dashboard_cabinets(request: Request, db: Session = Depends(get_db)):
+    """Список доступных кабинетов для текущего пользователя."""
     mapping = load_token_mapping()
-    return [{"cabinet_id": cid, "seller_name": name} for cid, name in mapping.items()]
+    allowed = _get_user_cabinets(request, db)
+    if allowed is None:
+        return [{"cabinet_id": cid, "seller_name": name} for cid, name in mapping.items()]
+    return [{"cabinet_id": cid, "seller_name": name} for cid, name in mapping.items() if cid in allowed]
 
 
 @app.get("/api/dashboard/summary")
-def dashboard_summary(days_back: int = Query(40, ge=1, le=90), db: Session = Depends(get_db)):
+def dashboard_summary(request: Request, days_back: int = Query(40, ge=1, le=90), db: Session = Depends(get_db)):
     """Сводные цифры: заказы, выручка, возвраты, отмены."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
-    rows = (
-        db.query(
+    q = db.query(
             Order.cabinet_id,
             func.count(Order.id).label("total_orders"),
             func.sum(case((Order.is_cancel == False, Order.price_with_disc), else_=0)).label("revenue"),
             func.sum(case((Order.is_cancel == True, 1), else_=0)).label("cancels"),
-        )
-        .filter(Order.date >= threshold)
-        .group_by(Order.cabinet_id)
-        .all()
-    )
+        ).filter(Order.date >= threshold)
+    q = _filter_by_cabinets(q, allowed, Order.cabinet_id)
+    rows = q.group_by(Order.cabinet_id).all()
 
     result = []
     for r in rows:
@@ -415,23 +778,22 @@ def dashboard_summary(days_back: int = Query(40, ge=1, le=90), db: Session = Dep
 
 
 @app.get("/api/dashboard/sales-chart")
-def dashboard_sales_chart(days_back: int = Query(40, ge=1, le=90), db: Session = Depends(get_db)):
+def dashboard_sales_chart(request: Request, days_back: int = Query(40, ge=1, le=90), db: Session = Depends(get_db)):
     """Продажи по дням для графика."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
-    rows = (
-        db.query(
+    q = db.query(
             Order.cabinet_id,
             func.date(Order.date).label("day"),
             func.count(Order.id).label("orders_count"),
             func.sum(case((Order.is_cancel == False, Order.price_with_disc), else_=0)).label("revenue"),
-        )
-        .filter(Order.date >= threshold, Order.is_cancel == False)
-        .group_by(Order.cabinet_id, func.date(Order.date))
-        .order_by(func.date(Order.date))
-        .all()
-    )
+        ).filter(Order.date >= threshold, Order.is_cancel == False)
+    q = _filter_by_cabinets(q, allowed, Order.cabinet_id)
+    rows = q.group_by(Order.cabinet_id, func.date(Order.date)).order_by(func.date(Order.date)).all()
 
     result = []
     for r in rows:
@@ -446,13 +808,15 @@ def dashboard_sales_chart(days_back: int = Query(40, ge=1, le=90), db: Session =
 
 
 @app.get("/api/dashboard/top-products")
-def dashboard_top_products(days_back: int = Query(40, ge=1, le=90), limit: int = Query(20, le=100), db: Session = Depends(get_db)):
+def dashboard_top_products(request: Request, days_back: int = Query(40, ge=1, le=90), limit: int = Query(20, le=100), db: Session = Depends(get_db)):
     """Топ товаров по выручке."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
-    rows = (
-        db.query(
+    q = db.query(
             Order.cabinet_id,
             Order.nm_id,
             Order.supplier_article,
@@ -460,13 +824,9 @@ def dashboard_top_products(days_back: int = Query(40, ge=1, le=90), limit: int =
             Order.brand,
             func.count(Order.id).label("orders_count"),
             func.sum(Order.price_with_disc).label("revenue"),
-        )
-        .filter(Order.date >= threshold, Order.is_cancel == False, Order.nm_id.isnot(None))
-        .group_by(Order.cabinet_id, Order.nm_id, Order.supplier_article, Order.subject, Order.brand)
-        .order_by(func.sum(Order.price_with_disc).desc())
-        # .limit(limit)
-        .all()
-    )
+        ).filter(Order.date >= threshold, Order.is_cancel == False, Order.nm_id.isnot(None))
+    q = _filter_by_cabinets(q, allowed, Order.cabinet_id)
+    rows = q.group_by(Order.cabinet_id, Order.nm_id, Order.supplier_article, Order.subject, Order.brand).order_by(func.sum(Order.price_with_disc).desc()).all()
 
     result = []
     for r in rows:
@@ -485,19 +845,19 @@ def dashboard_top_products(days_back: int = Query(40, ge=1, le=90), limit: int =
 
 @app.get("/api/dashboard/characteristics")
 def dashboard_characteristics(
+    request: Request,
     days_back: int = Query(40, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
     """Все карточки товаров для дашборда (без токена)."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
-    data = (
-        db.query(ProductCharacteristic)
-        .filter(ProductCharacteristic.synced_at >= threshold)
-        .order_by(ProductCharacteristic.synced_at.desc())
-        .limit(5000)
-        .all()
-    )
+    q = db.query(ProductCharacteristic).filter(ProductCharacteristic.synced_at >= threshold)
+    q = _filter_by_cabinets(q, allowed, ProductCharacteristic.cabinet_id)
+    data = q.order_by(ProductCharacteristic.synced_at.desc()).limit(5000).all()
     return [
         {
             "id": item.id,
@@ -512,22 +872,22 @@ def dashboard_characteristics(
 
 
 @app.get("/api/dashboard/stocks-summary")
-def dashboard_stocks_summary(db: Session = Depends(get_db)):
+def dashboard_stocks_summary(request: Request, db: Session = Depends(get_db)):
     """Остатки сгруппированные по товару."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
 
-    rows = (
-        db.query(
+    q = db.query(
             Stock.cabinet_id,
             Stock.nm_id,
             func.sum(Stock.quantity).label("quantity"),
             func.sum(Stock.in_way_to_client).label("in_way_to_client"),
             func.sum(Stock.in_way_from_client).label("in_way_from_client"),
         )
-        .group_by(Stock.cabinet_id, Stock.nm_id)
-        .order_by(func.sum(Stock.quantity).desc())
-        .all()
-    )
+    q = _filter_by_cabinets(q, allowed, Stock.cabinet_id)
+    rows = q.group_by(Stock.cabinet_id, Stock.nm_id).order_by(func.sum(Stock.quantity).desc()).all()
 
     result = []
     for r in rows:
@@ -543,12 +903,14 @@ def dashboard_stocks_summary(db: Session = Depends(get_db)):
 
 
 @app.get("/api/dashboard/sales-report-summary")
-def dashboard_sales_report_summary(db: Session = Depends(get_db)):
+def dashboard_sales_report_summary(request: Request, db: Session = Depends(get_db)):
     """Сводка по отчёту реализации: комиссии WB, к перечислению."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
 
-    rows = (
-        db.query(
+    q = db.query(
             SalesReport.cabinet_id,
             SalesReport.nm_id,
             SalesReport.sa_name,
@@ -561,10 +923,8 @@ def dashboard_sales_report_summary(db: Session = Depends(get_db)):
             func.sum(SalesReport.penalty).label("penalty"),
             func.count(SalesReport.id).label("rows_count"),
         )
-        .group_by(SalesReport.cabinet_id, SalesReport.nm_id, SalesReport.sa_name, SalesReport.subject_name)
-        .order_by(func.sum(SalesReport.ppvz_for_pay).desc())
-        .all()
-    )
+    q = _filter_by_cabinets(q, allowed, SalesReport.cabinet_id)
+    rows = q.group_by(SalesReport.cabinet_id, SalesReport.nm_id, SalesReport.sa_name, SalesReport.subject_name).order_by(func.sum(SalesReport.ppvz_for_pay).desc()).all()
 
     result = []
     for r in rows:
@@ -585,21 +945,21 @@ def dashboard_sales_report_summary(db: Session = Depends(get_db)):
 
 @app.get("/api/dashboard/orders-raw")
 def dashboard_orders_raw(
+    request: Request,
     days_back: int = Query(40, ge=1, le=90),
     limit: int = Query(30000, le=30000),
     db: Session = Depends(get_db)
 ):
     """Сырые заказы для таблицы дашборда."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
-    rows = (
-        db.query(Order)
-        .filter(Order.date >= threshold)
-        .order_by(Order.date.desc())
-        .limit(limit)
-        .all()
-    )
+    q = db.query(Order).filter(Order.date >= threshold)
+    q = _filter_by_cabinets(q, allowed, Order.cabinet_id)
+    rows = q.order_by(Order.date.desc()).limit(limit).all()
 
     result = []
     for item in rows:
@@ -757,11 +1117,15 @@ def api_delete_wb_token(token_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/dashboard/abc-xyz")
 def dashboard_abc_xyz(
+    request: Request,
     cabinet_id: str | None = Query(None),
     days_back: int = Query(40, ge=7, le=90),
     db: Session = Depends(get_db),
 ):
     """ABC/XYZ анализ по товарам."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return {"items": [], "matrix": {}, "total_revenue": 0, "total_items": 0}
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
@@ -780,6 +1144,7 @@ def dashboard_abc_xyz(
     )
     if cabinet_id:
         q = q.filter(Order.cabinet_id == cabinet_id)
+    q = _filter_by_cabinets(q, allowed, Order.cabinet_id)
 
     rows = q.all()
 
@@ -796,6 +1161,7 @@ def dashboard_abc_xyz(
     )
     if cabinet_id:
         day_q = day_q.filter(Order.cabinet_id == cabinet_id)
+    day_q = _filter_by_cabinets(day_q, allowed, Order.cabinet_id)
 
     day_rows = day_q.all()
 
@@ -878,20 +1244,20 @@ def dashboard_abc_xyz(
 
 @app.get("/api/dashboard/shelf")
 def dashboard_shelf(
+    request: Request,
     days_back: int = Query(30, ge=1, le=90),
     db: Session = Depends(get_db),
 ):
     """Витрина продаж: просмотры, конверсия, добавления в корзину, заказы."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
-    rows = (
-        db.query(ShelfMetric)
-        .filter(ShelfMetric.period_end >= threshold)
-        .order_by(ShelfMetric.order_sum.desc())
-        .limit(10000)
-        .all()
-    )
+    q = db.query(ShelfMetric).filter(ShelfMetric.period_end >= threshold)
+    q = _filter_by_cabinets(q, allowed, ShelfMetric.cabinet_id)
+    rows = q.order_by(ShelfMetric.order_sum.desc()).limit(10000).all()
 
     result = []
     for r in rows:
@@ -929,20 +1295,20 @@ def dashboard_shelf(
 
 @app.get("/api/dashboard/stock-offices")
 def dashboard_stock_offices(
+    request: Request,
     days_back: int = Query(30, ge=1, le=90),
     db: Session = Depends(get_db),
 ):
     """Остатки по складам и регионам."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
-    rows = (
-        db.query(StockByOffice)
-        .filter(StockByOffice.period_end >= threshold)
-        .order_by(StockByOffice.stock_sum.desc())
-        .limit(50000)
-        .all()
-    )
+    q = db.query(StockByOffice).filter(StockByOffice.period_end >= threshold)
+    q = _filter_by_cabinets(q, allowed, StockByOffice.cabinet_id)
+    rows = q.order_by(StockByOffice.stock_sum.desc()).limit(50000).all()
 
     result = []
     for r in rows:
@@ -965,24 +1331,25 @@ def dashboard_stock_offices(
 
 @app.get("/api/dashboard/item-ratings")
 def dashboard_item_ratings(
+    request: Request,
     days_back: int = Query(30, ge=1, le=90),
     db: Session = Depends(get_db),
 ):
     """Оценки и отзывы товаров."""
     from sqlalchemy import func
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
-    latest = (
-        db.query(
+    latest_q = db.query(
             ItemRating.cabinet_id,
             ItemRating.nm_id,
             func.max(ItemRating.period_end).label("max_period_end")
-        )
-        .filter(ItemRating.period_end >= threshold)
-        .group_by(ItemRating.cabinet_id, ItemRating.nm_id)
-        .subquery()
-    )
+        ).filter(ItemRating.period_end >= threshold)
+    latest_q = _filter_by_cabinets(latest_q, allowed, ItemRating.cabinet_id)
+    latest = latest_q.group_by(ItemRating.cabinet_id, ItemRating.nm_id).subquery()
 
     rows = (
         db.query(ItemRating)
@@ -1026,20 +1393,20 @@ def dashboard_item_ratings(
 
 @app.get("/api/dashboard/funnel")
 def dashboard_funnel(
+    request: Request,
     days_back: int = Query(30, ge=1, le=90),
     db: Session = Depends(get_db),
 ):
     """Воронка конверсии: сравнение периодов, динамика."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
-    rows = (
-        db.query(FunnelMetric)
-        .filter(FunnelMetric.period_end >= threshold)
-        .order_by(FunnelMetric.order_sum.desc())
-        .limit(10000)
-        .all()
-    )
+    q = db.query(FunnelMetric).filter(FunnelMetric.period_end >= threshold)
+    q = _filter_by_cabinets(q, allowed, FunnelMetric.cabinet_id)
+    rows = q.order_by(FunnelMetric.order_sum.desc()).limit(10000).all()
 
     result = []
     for r in rows:
@@ -1077,12 +1444,18 @@ def dashboard_funnel(
 
 @app.get("/api/dashboard/ad-campaigns")
 def dashboard_ad_campaigns(
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """Рекламные кампании: список, статусы, типы."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
 
-    rows = db.query(AdCampaign).order_by(AdCampaign.status.desc(), AdCampaign.advert_id.desc()).limit(50000).all()
+    q = db.query(AdCampaign)
+    q = _filter_by_cabinets(q, allowed, AdCampaign.cabinet_id)
+    rows = q.order_by(AdCampaign.status.desc(), AdCampaign.advert_id.desc()).limit(50000).all()
 
     STATUS_MAP = {-1: "Удалена", 4: "Готова", 7: "Завершена", 8: "Отменена", 9: "Активна", 11: "На паузе"}
     TYPE_MAP = {6: "Аукцион", 8: "Единая ставка (устар.)", 9: "Единая/ручная"}
@@ -1107,20 +1480,20 @@ def dashboard_ad_campaigns(
 
 @app.get("/api/dashboard/ad-stats")
 def dashboard_ad_stats(
+    request: Request,
     days_back: int = Query(30, ge=1, le=90),
     db: Session = Depends(get_db),
 ):
     """Статистика рекламных кампаний: просмотры, клики, CTR, CPC, CR, заказы, затраты."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
     threshold = datetime.now().date() - timedelta(days=days_back)
 
-    rows = (
-        db.query(AdCampaignStats)
-        .filter(AdCampaignStats.date >= datetime.combine(threshold, datetime.min.time()))
-        .order_by(AdCampaignStats.spend.desc())
-        .limit(100000)
-        .all()
-    )
+    q = db.query(AdCampaignStats).filter(AdCampaignStats.date >= datetime.combine(threshold, datetime.min.time()))
+    q = _filter_by_cabinets(q, allowed, AdCampaignStats.cabinet_id)
+    rows = q.order_by(AdCampaignStats.spend.desc()).limit(100000).all()
 
     result = []
     for r in rows:
@@ -1146,20 +1519,20 @@ def dashboard_ad_stats(
 
 @app.get("/api/dashboard/ad-expenses")
 def dashboard_ad_expenses(
+    request: Request,
     days_back: int = Query(30, ge=1, le=90),
     db: Session = Depends(get_db),
 ):
     """История затрат на рекламу."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
-    rows = (
-        db.query(AdExpense)
-        .filter(AdExpense.upd_time >= threshold)
-        .order_by(AdExpense.upd_time.desc())
-        .limit(50000)
-        .all()
-    )
+    q = db.query(AdExpense).filter(AdExpense.upd_time >= threshold)
+    q = _filter_by_cabinets(q, allowed, AdExpense.cabinet_id)
+    rows = q.order_by(AdExpense.upd_time.desc()).limit(50000).all()
 
     result = []
     for r in rows:
@@ -1183,28 +1556,68 @@ def dashboard_ad_expenses(
 
 @app.get("/api/dashboard/stock-forecast")
 def dashboard_stock_forecast(
+    request: Request,
     days_back: int = Query(30, ge=1, le=90),
     cabinet_id: str = Query(None),
     db: Session = Depends(get_db),
 ):
     """Прогноз остатков на 30 дней."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return {"items": [], "total_skus": 0}
+    if allowed is not None and cabinet_id and cabinet_id not in allowed:
+        return {"items": [], "total_skus": 0}
     return get_stock_forecast(db, cabinet_id, days_back)
 
 
 @app.get("/api/dashboard/unit-economics")
 def dashboard_unit_economics(
+    request: Request,
     days_back: int = Query(30, ge=1, le=90),
     cabinet_id: str = Query(None),
     db: Session = Depends(get_db),
 ):
     """Юнит-экономика по каждому SKU."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return {"items": [], "total_skus": 0}
+    if allowed is not None and cabinet_id and cabinet_id not in allowed:
+        return {"items": [], "total_skus": 0}
     return get_unit_economics(db, cabinet_id, days_back)
 
 
 @app.get("/api/dashboard/ad-search-clusters")
 def dashboard_ad_search_clusters(
+    request: Request,
     cabinet_id: str = Query(None),
     db: Session = Depends(get_db),
 ):
     """Поисковые кластеры рекламных кампаний."""
-    return get_ad_search_clusters(db, cabinet_id)
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
+    mapping = load_token_mapping()
+    data = get_ad_search_clusters(db, cabinet_id)
+    result = []
+    for r in data:
+        if allowed is not None and r.cabinet_id not in allowed:
+            continue
+        result.append({
+            "cabinet_id": r.cabinet_id,
+            "seller_name": mapping.get(r.cabinet_id, r.cabinet_id[:8]),
+            "advert_id": r.advert_id,
+            "nm_id": r.nm_id,
+            "keyword": r.keyword,
+            "views": r.views,
+            "clicks": r.clicks,
+            "ctr": r.ctr,
+            "cpc": r.cpc,
+            "cpm": r.cpm,
+            "avg_pos": r.avg_pos,
+            "atbs": r.atbs,
+            "shks": r.shks,
+            "sum_price": r.sum_price,
+            "orders": r.orders,
+            "spend": r.spend,
+        })
+    return result

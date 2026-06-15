@@ -291,13 +291,31 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=True)
+    company: Mapped[str] = mapped_column(String(200), nullable=True)
+    phone: Mapped[str] = mapped_column(String(50), nullable=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     api_keys: Mapped[list["ApiKey"]] = relationship("ApiKey", back_populates="user", cascade="all, delete-orphan")
     wb_tokens: Mapped[list["WbToken"]] = relationship("WbToken", back_populates="user", cascade="all, delete-orphan")
+    cabinet_access: Mapped[list["UserCabinetAccess"]] = relationship("UserCabinetAccess", back_populates="user", cascade="all, delete-orphan")
+
+
+class UserCabinetAccess(Base):
+    __tablename__ = "user_cabinet_access"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    access_all: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped["User"] = relationship("User", back_populates="cabinet_access")
+    __table_args__ = (UniqueConstraint("user_id", "cabinet_id", name="uq_user_cabinet"),)
 
 
 class ApiKey(Base):
@@ -537,6 +555,7 @@ class AdSearchCluster(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     advert_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    nm_id: Mapped[int] = mapped_column(Integer, nullable=True)
     keyword: Mapped[str] = mapped_column(String(500), nullable=False)
     cluster_id: Mapped[int] = mapped_column(Integer, nullable=True)
     bids: Mapped[int] = mapped_column(Integer, default=0)
@@ -544,9 +563,13 @@ class AdSearchCluster(Base):
     clicks: Mapped[int] = mapped_column(Integer, default=0)
     ctr: Mapped[float] = mapped_column(Float, default=0)
     cpc: Mapped[float] = mapped_column(Float, default=0)
+    cpm: Mapped[float] = mapped_column(Float, default=0)
+    avg_pos: Mapped[float] = mapped_column(Float, default=0)
+    atbs: Mapped[int] = mapped_column(Integer, default=0)
+    shks: Mapped[int] = mapped_column(Integer, default=0)
     sum_price: Mapped[float] = mapped_column(Float, default=0)
     orders: Mapped[int] = mapped_column(Integer, default=0)
     spend: Mapped[float] = mapped_column(Float, default=0)
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
-    __table_args__ = (UniqueConstraint("cabinet_id", "advert_id", "keyword", name="uq_ad_search_cluster"),)
+    __table_args__ = (UniqueConstraint("cabinet_id", "advert_id", "nm_id", "keyword", name="uq_ad_search_cluster"),)

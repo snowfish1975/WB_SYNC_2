@@ -130,6 +130,7 @@
   }
 
   window.addEventListener('wb:tab-activated:shelf', shelfLoad);
+  window.addEventListener('wb:period-changed', () => { if (data.length) shelfLoad(); });
   window.addEventListener('wb:cabinet-changed', () => { if (data.length) { shelfFilter(); renderMetrics(); } });
 })();
 </script>

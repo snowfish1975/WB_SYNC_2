@@ -311,6 +311,7 @@
   }
 
   window.addEventListener('wb:tab-activated:ad', adLoad);
+  window.addEventListener('wb:period-changed', () => { if (statsData.length) adLoad(); });
   window.addEventListener('wb:cabinet-changed', () => { if (statsData.length) { adStatsFilter(); adExpFilter(); renderMetrics(); renderChart(); renderExpensesSummary(); } });
 })();
 </script>

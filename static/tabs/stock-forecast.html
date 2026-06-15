@@ -137,6 +137,7 @@
   }
 
   window.addEventListener('wb:tab-activated:stock-forecast', sfLoad);
+  window.addEventListener('wb:period-changed', () => { if (data.length) sfLoad(); });
   window.addEventListener('wb:cabinet-changed', () => { if (data.length) { sfFilter(); renderMetrics(); } });
 })();
 </script>

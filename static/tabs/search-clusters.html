@@ -5,7 +5,10 @@
   <div class="summary-grid section-mb" id="scMetrics"></div>
 
   <div class="card">
-    <div class="section-title">Поисковые кластеры рекламных кампаний</div>
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+      Поисковые кластеры рекламных кампаний
+      <button class="sync-btn" style="font-size:11px;padding:6px 14px;margin:0" onclick="scRefresh()" id="scRefreshBtn">⟳ Обновить</button>
+    </div>
     <div class="filters">
       <input class="filter-input" id="scSearch" placeholder="Запрос / кампания..." oninput="scFilter()">
       <select class="filter-select" id="scSortBy" onchange="scFilter()">
@@ -18,13 +21,13 @@
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th onclick="scSort('seller_name')">КАБИНЕТ ↕</th>
-          <th onclick="scSort('advert_id')">КАМПАНИЯ ↕</th>
           <th onclick="scSort('keyword')">ЗАПРОС ↕</th>
+          <th onclick="scSort('nm_id')">АРТ WB ↕</th>
           <th onclick="scSort('views')">ПОКАЗЫ ↕</th>
           <th onclick="scSort('clicks')">КЛИКИ ↕</th>
           <th onclick="scSort('ctr')">CTR % ↕</th>
           <th onclick="scSort('cpc')">CPC ₽ ↕</th>
+          <th onclick="scSort('avg_pos')">ПОЗИЦИЯ ↕</th>
           <th onclick="scSort('orders')">ЗАКАЗЫ ↕</th>
           <th onclick="scSort('sum_price')">СУММА ₽ ↕</th>
           <th onclick="scSort('spend')">ЗАТРАТЫ ₽ ↕</th>
@@ -38,6 +41,7 @@
 
 <script>
 (function() {
+  function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
   let data = [], filtered = [], page = 1;
   const PER = 50;
   let sortCol = 'spend', sortDir = -1;
@@ -52,6 +56,19 @@
     renderMetrics();
   }
   window.scLoad = scLoad;
+
+  window.scRefresh = async function() {
+    const btn = document.getElementById('scRefreshBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Загрузка...';
+    try {
+      await fetch('/api/sync/trigger-search-clusters', { method: 'POST' });
+      await new Promise(r => setTimeout(r, 3000));
+      await scLoad();
+    } catch(e) {}
+    btn.disabled = false;
+    btn.textContent = '⟳ Обновить';
+  };
 
   function scFilter() {
     const search = (document.getElementById('scSearch')?.value || '').toLowerCase();
@@ -92,8 +109,10 @@
     const avgCTR = totalViews > 0 ? (totalClicks / totalViews * 100).toFixed(2) : 0;
     const avgCPC = totalClicks > 0 ? (totalSpend / totalClicks).toFixed(2) : 0;
     const uniqueKeywords = new Set(d.map(r => r.keyword)).size;
+    const totalAtbs = d.reduce((s, r) => s + (r.atbs || 0), 0);
     m.innerHTML = `
-      <div class="card metric-card teal"><div class="metric-label">ЗАПРОСОВ</div><div class="metric-value">${uniqueKeywords}</div></div>
+      <div class="card metric-card teal"><div class="metric-label">КЛАСТЕРОВ</div><div class="metric-value">${fmt(d.length)}</div></div>
+      <div class="card metric-card teal"><div class="metric-label">УНИКАЛЬНЫХ ЗАПРОСОВ</div><div class="metric-value">${uniqueKeywords}</div></div>
       <div class="card metric-card orange"><div class="metric-label">ЗАТРАТЫ</div><div class="metric-value">${fmtMoney(Math.round(totalSpend))}</div></div>
       <div class="card metric-card"><div class="metric-label">CTR</div><div class="metric-value">${avgCTR}%</div></div>
       <div class="card metric-card"><div class="metric-label">CPC</div><div class="metric-value">${fmtMoney(Math.round(avgCPC))}</div></div>
@@ -106,18 +125,18 @@
     if (!body) return;
     const slice = filtered.slice((page-1)*PER, page*PER);
     if (!filtered.length) {
-      body.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:30px;">Нет данных. Поисковые кластеры загружаются при синхронизации рекламных кампаний.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:30px;font-family:'IBM Plex Mono',monospace;font-size:12px;">Нет данных поисковых кластеров.<br>Данные загружаются при синхронизации рекламных кампаний.</td></tr>`;
       document.getElementById('scPagination').innerHTML = '';
       return;
     }
     body.innerHTML = slice.map(r => `<tr class="fade-in">
-      <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
-      <td class="td-mono">${r.advert_id}</td>
-      <td>${r.keyword || '—'}</td>
+      <td>${esc(r.keyword)}</td>
+      <td class="td-mono">${r.nm_id || '—'}</td>
       <td class="td-mono">${fmt(r.views)}</td>
       <td class="td-mono">${fmt(r.clicks)}</td>
       <td class="td-mono" style="color:var(--accent2)">${r.ctr}%</td>
       <td class="td-mono">${r.cpc}</td>
+      <td class="td-mono">${r.avg_pos ? r.avg_pos.toFixed(1) : '—'}</td>
       <td class="td-mono" style="color:var(--green)">${fmt(r.orders)}</td>
       <td class="td-mono" style="color:var(--accent)">${fmtMoney(Math.round(r.sum_price))}</td>
       <td class="td-mono" style="color:var(--red)">${fmtMoney(Math.round(r.spend))}</td>
@@ -127,5 +146,6 @@
 
   window.addEventListener('wb:tab-activated:search-clusters', scLoad);
   window.addEventListener('wb:cabinet-changed', () => { if (data.length) { scFilter(); renderMetrics(); } });
+  window.addEventListener('wb:period-changed', () => { if (data.length) { scFilter(); renderMetrics(); } });
 })();
 </script>

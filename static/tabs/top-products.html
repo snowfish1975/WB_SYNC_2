@@ -121,6 +121,7 @@
   }
 
   window.addEventListener('wb:tab-activated:top', topLoad);
+  window.addEventListener('wb:period-changed', () => { if (data.length) topLoad(); });
   window.addEventListener('wb:cabinet-changed', () => { if (data.length) topFilter(); });
 })();
 </script>

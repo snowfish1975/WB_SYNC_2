@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WB Sync — Вход</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/themes.css?v=3">
+<link rel="stylesheet" href="/static/base.css?v=3">
+<style>
+.login-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 20px;
+}
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 40px 32px;
+}
+.login-logo {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 36px;
+  letter-spacing: 4px;
+  color: var(--accent);
+  text-align: center;
+  margin-bottom: 8px;
+}
+.login-sub {
+  text-align: center;
+  color: var(--text3);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 2px;
+  margin-bottom: 32px;
+}
+.login-field {
+  margin-bottom: 16px;
+}
+.login-field label {
+  display: block;
+  font-size: 11px;
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 6px;
+}
+.login-field input {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.login-field input:focus {
+  border-color: var(--accent);
+}
+.login-btn {
+  width: 100%;
+  padding: 14px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: opacity 0.2s;
+}
+.login-btn:hover { opacity: 0.85; }
+.login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.login-error {
+  background: rgba(255,71,87,0.1);
+  border: 1px solid rgba(255,71,87,0.3);
+  color: #ff4757;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  display: none;
+}
+.theme-row {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 24px;
+}
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">WB SYNC</div>
+    <div class="login-sub">DASHBOARD</div>
+
+    <div class="login-error" id="loginError"></div>
+
+    <form method="POST" action="/login" id="loginForm">
+      <div class="login-field">
+        <label>Логин</label>
+        <input type="text" name="username" id="username" autocomplete="username" required autofocus>
+      </div>
+      <div class="login-field">
+        <label>Пароль</label>
+        <input type="password" name="password" id="password" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="login-btn" id="loginBtn">ВОЙТИ</button>
+    </form>
+
+    <div class="theme-row">
+      <div class="theme-dot" data-t="dark" title="Dark" onclick="applyTheme('dark')"></div>
+      <div class="theme-dot" data-t="midnight" title="Midnight" onclick="applyTheme('midnight')"></div>
+      <div class="theme-dot" data-t="light" title="Light" onclick="applyTheme('light')"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const theme = localStorage.getItem('wb_theme') || 'dark';
+document.documentElement.setAttribute('data-theme', theme);
+document.querySelectorAll('.theme-dot').forEach(d => {
+  d.classList.toggle('active', d.dataset.t === theme);
+});
+
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem('wb_theme', t);
+  document.querySelectorAll('.theme-dot').forEach(d => {
+    d.classList.toggle('active', d.dataset.t === t);
+  });
+}
+
+document.getElementById('loginForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const btn = document.getElementById('loginBtn');
+  const errEl = document.getElementById('loginError');
+  btn.disabled = true;
+  btn.textContent = 'ВХОД...';
+  errEl.style.display = 'none';
+
+  try {
+    const formData = new FormData(this);
+    const resp = await fetch('/login', { method: 'POST', body: formData, redirect: 'follow' });
+    if (resp.redirected || resp.url.includes('/dashboard') || resp.status === 200) {
+      window.location.href = resp.url || '/dashboard';
+    } else {
+      const text = await resp.text();
+      const match = text.match(/<h2[^>]*>(.*?)<\/h2>/);
+      errEl.textContent = match ? match[1] : 'Ошибка входа';
+      errEl.style.display = 'block';
+    }
+  } catch(err) {
+    window.location.href = '/dashboard';
+  }
+  btn.disabled = false;
+  btn.textContent = 'ВОЙТИ';
+});
+</script>
+</body>
+</html>

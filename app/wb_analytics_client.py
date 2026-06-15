@@ -228,16 +228,33 @@ async def fetch_ad_balance(token: str) -> dict:
         return resp.json()
 
 
-async def fetch_ad_search_clusters(token: str, advert_id: int) -> list[dict]:
-    """GET /adv/v1/search — search clusters for a campaign"""
-    headers = {"Authorization": token}
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(
-            f"{ADVERT_API_BASE}/adv/v1/search",
-            headers=headers, params={"id": advert_id},
-        )
-        if resp.status_code == 404:
-            return []
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("keywords", []) if isinstance(data, dict) else data
+async def fetch_ad_search_clusters(token: str, items: list[dict], date_from: str, date_to: str) -> list[dict]:
+    """POST /adv/v0/normquery/stats — search cluster statistics.
+    
+    items: [{"advert_id": int, "nm_id": int}, ...] (max 100)
+    Returns list of {advert_id, nm_id, stats: [{norm_query, views, clicks, ...}]}
+    """
+    headers = {"Authorization": token, "Content-Type": "application/json"}
+    results = []
+    for i in range(0, len(items), 100):
+        batch = items[i:i+100]
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{ADVERT_API_BASE}/adv/v0/normquery/stats",
+                headers=headers,
+                json={"from": date_from, "to": date_to, "items": batch},
+            )
+            if resp.status_code == 429:
+                logger.warning("Search clusters: rate limited, waiting 6s")
+                await asyncio.sleep(6)
+                resp = await client.post(
+                    f"{ADVERT_API_BASE}/adv/v0/normquery/stats",
+                    headers=headers,
+                    json={"from": date_from, "to": date_to, "items": batch},
+                )
+            if resp.status_code != 200:
+                logger.warning(f"Search clusters HTTP {resp.status_code}: {resp.text[:300]}")
+                continue
+            data = resp.json()
+            results.extend(data.get("stats", []))
+    return results

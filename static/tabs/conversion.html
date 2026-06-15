@@ -224,6 +224,7 @@
   }
 
   window.addEventListener('wb:tab-activated:funnel', funnelLoad);
+  window.addEventListener('wb:period-changed', () => { if (data.length) funnelLoad(); });
   window.addEventListener('wb:cabinet-changed', () => { if (data.length) { funnelFilter(); renderFunnelChart(); renderDynStats(); } });
 })();
 </script>

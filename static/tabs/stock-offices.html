@@ -116,6 +116,7 @@
   }
 
   window.addEventListener('wb:tab-activated:stock-offices', soLoad);
+  window.addEventListener('wb:period-changed', () => { if (data.length) soLoad(); });
   window.addEventListener('wb:cabinet-changed', () => { if (data.length) { soFilter(); renderMetrics(); } });
 })();
 </script>
