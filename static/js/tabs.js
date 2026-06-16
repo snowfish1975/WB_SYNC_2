@@ -18,6 +18,7 @@ const TAB_SRCS = {
   'stock-forecast': '/static/tabs/stock-forecast.html',
   'unit-economics': '/static/tabs/unit-economics.html',
   'search-clusters': '/static/tabs/search-clusters.html',
+  'rnp':               '/static/tabs/rnp.html',
   'profile':         '/static/tabs/profile.html',
   'admin':           '/static/tabs/admin.html',
 };

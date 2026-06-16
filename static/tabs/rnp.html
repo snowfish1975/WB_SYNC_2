@@ -1,0 +1,370 @@
+<!-- ============================================================
+     TAB: РУКА НА ПУЛЬСЕ (РНП)
+     ============================================================ -->
+<div id="rnpTab">
+  <div class="summary-grid section-mb" id="rnpMetrics"></div>
+
+  <div class="card section-mb">
+    <div class="section-title">Прогноз (на основе заказов)</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Показатель</th>
+          <th>Факт</th>
+          <th>План</th>
+          <th>%</th>
+        </tr></thead>
+        <tbody id="rnpForecastBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card section-mb">
+    <div class="section-title">WB Расходы (факт)</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Статья</th>
+          <th>Сумма</th>
+          <th>% от продаж</th>
+        </tr></thead>
+        <tbody id="rnpWbExpensesBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card section-mb">
+    <div class="section-title">P&L (прогноз)</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Показатель</th>
+          <th>Сумма</th>
+          <th>% от продаж</th>
+        </tr></thead>
+        <tbody id="rnpPnlBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card section-mb">
+    <div class="section-title">Относительные метрики</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Метрика</th>
+          <th>Значение</th>
+        </tr></thead>
+        <tbody id="rnpRelativeBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card section-mb">
+    <div class="section-title">Настройки кабинета</div>
+    <div class="filters">
+      <button class="filter-btn" onclick="rnpEditSettings()">Редактировать настройки</button>
+      <button class="filter-btn" onclick="rnpEditCosts()">Себестоимость</button>
+      <button class="filter-btn" onclick="rnpEditFixedExpenses()">Постоянные расходы</button>
+      <button class="filter-btn" onclick="rnpEditPlans()">Планы</button>
+    </div>
+    <div id="rnpSettingsContent"></div>
+  </div>
+
+  <div class="card" id="rnpSettingsModal" style="display:none;">
+    <div class="section-title" id="rnpModalTitle"></div>
+    <div id="rnpModalContent"></div>
+    <div class="filters" style="margin-top:15px;">
+      <button class="filter-btn" onclick="rnpSaveModal()">Сохранить</button>
+      <button class="filter-btn" onclick="rnpCloseModal()">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+  let rnpData = null;
+  let currentModal = null;
+
+  async function rnpLoad() {
+    try {
+      const res = await fetch(`/api/rnp/calc?cabinet_id=${WB.cabinet}&days_back=${WB.period}`);
+      rnpData = await res.json();
+    } catch(e) { rnpData = null; }
+    rnpRender();
+  }
+  window.rnpLoad = rnpLoad;
+
+  function rnpRender() {
+    if (!rnpData) return;
+    renderMetrics();
+    renderForecast();
+    renderWbExpenses();
+    renderPnl();
+    renderRelative();
+    renderSettings();
+  }
+
+  function renderMetrics() {
+    const t = rnpData.totals;
+    const m = rnpData.relative_metrics;
+    document.getElementById('rnpMetrics').innerHTML = `
+      <div class="summary-card"><div class="summary-value">${fmt(t.orders_amount)}</div><div class="summary-label">Заказы сумм</div></div>
+      <div class="summary-card"><div class="summary-value">${fmt(t.orders_count)}</div><div class="summary-label">Заказы шт</div></div>
+      <div class="summary-card"><div class="summary-value">${fmt(t.avg_check_orders)}</div><div class="summary-label">Средний чек</div></div>
+      <div class="summary-card"><div class="summary-value">${fmt(t.spp_pct)}%</div><div class="summary-label">СПП</div></div>
+      <div class="summary-card"><div class="summary-value">${fmt(t.sales_amount)}</div><div class="summary-label">Продажи сумм</div></div>
+      <div class="summary-card"><div class="summary-value">${fmt(t.sales_count)}</div><div class="summary-label">Продажи шт</div></div>
+      <div class="summary-card"><div class="summary-value">${fmt(rnpData.net_profit)}</div><div class="summary-label">Чистая прибыль</div></div>
+      <div class="summary-card"><div class="summary-value">${rnpData.profitability}%</div><div class="summary-label">Рентабельность</div></div>
+    `;
+  }
+
+  function renderForecast() {
+    const t = rnpData.totals;
+    const p = rnpData.plans[0] || {};
+    const rows = [
+      ['Заказы сумм', t.orders_amount, p.orders_amount],
+      ['Заказы шт', t.orders_count, p.orders_count],
+      ['Средний чек', t.avg_check_orders, p.avg_price],
+      ['СПП', t.spp_pct + '%', p.spp ? p.spp + '%' : ''],
+      ['Рекламный бюджет', t.ad_spend, ''],
+      ['ДРР', t.drr + '%', p.drr ? p.drr + '%' : ''],
+    ];
+    document.getElementById('rnpForecastBody').innerHTML = rows.map(r => {
+      const pct = r[2] ? ((r[1] / r[2]) * 100).toFixed(1) + '%' : '';
+      return `<tr><td>${r[0]}</td><td>${fmt(r[1])}</td><td>${fmt(r[2])}</td><td>${pct}</td></tr>`;
+    }).join('');
+  }
+
+  function renderWbExpenses() {
+    const w = rnpData.wb_expenses;
+    const sa = rnpData.totals.sales_amount || 1;
+    const rows = [
+      ['Логистика', w.delivery],
+      ['Комиссия', w.commission],
+      ['Хранение', w.storage],
+      ['Платная приёмка', w.acceptance],
+      ['Продвижение', w.promotion],
+      ['Штрафы', w.penalties],
+      ['ИТОГО', rnpData.wb_expenses_total],
+    ];
+    document.getElementById('rnpWbExpensesBody').innerHTML = rows.map(r => {
+      const pct = ((r[1] / sa) * 100).toFixed(1) + '%';
+      return `<tr><td>${r[0]}</td><td>${fmt(r[1])}</td><td>${pct}</td></tr>`;
+    }).join('');
+  }
+
+  function renderPnl() {
+    const sa = rnpData.totals.sales_amount || 1;
+    const rows = [
+      ['Прогноз выкупа', rnpData.totals.sales_amount],
+      ['WB Расходы', -rnpData.wb_expenses_total],
+      ['Себестоимость', -rnpData.totals.cost_of_goods],
+      ['Валовая маржа', rnpData.gross_margin],
+      ['Операционные расходы', -rnpData.operating_expenses],
+      ['EBITDA', rnpData.ebitda],
+      ['Налоги', -rnpData.taxes.total],
+      ['Чистая прибыль', rnpData.net_profit],
+    ];
+    document.getElementById('rnpPnlBody').innerHTML = rows.map(r => {
+      const pct = ((r[1] / sa) * 100).toFixed(1) + '%';
+      return `<tr><td>${r[0]}</td><td>${fmt(r[1])}</td><td>${pct}</td></tr>`;
+    }).join('');
+  }
+
+  function renderRelative() {
+    const m = rnpData.relative_metrics;
+    const rows = [
+      ['Наценка', m.markup],
+      ['Логистика на единицу', m.logistics_per_unit],
+      ['Себестоимость на единицу', m.cost_per_unit],
+      ['Продвижение на единицу', m.promotion_per_unit],
+      ['Хранение на единицу', m.storage_per_unit],
+      ['Чистая прибыль на единицу', m.net_profit_per_unit],
+      ['Расходы площадки от продаж', m.platform_expenses_pct + '%'],
+      ['Комиссия от продаж', m.commission_pct + '%'],
+      ['Логистика от продаж', m.logistics_pct + '%'],
+      ['Продвижение от продаж', m.promotion_pct + '%'],
+      ['Хранение от продаж', m.storage_pct + '%'],
+      ['Себестоимость от продаж', m.cost_pct + '%'],
+      ['Налоги от продаж', m.taxes_pct + '%'],
+    ];
+    document.getElementById('rnpRelativeBody').innerHTML = rows.map(r =>
+      `<tr><td>${r[0]}</td><td>${typeof r[1] === 'number' ? fmt(r[1]) : r[1]}</td></tr>`
+    ).join('');
+  }
+
+  function renderSettings() {
+    const s = rnpData.settings;
+    document.getElementById('rnpSettingsContent').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;">
+        <div><strong>УСН:</strong> ${(s.usn_rate*100).toFixed(0)}%</div>
+        <div><strong>НДС:</strong> ${(s.nds_rate*100).toFixed(0)}%</div>
+        <div><strong>Курс USD:</strong> ${s.usd_rate}</div>
+        <div><strong>Курс CNY:</strong> ${s.cny_rate}</div>
+      </div>
+    `;
+  }
+
+  function fmt(v) {
+    if (v === null || v === undefined) return '—';
+    if (typeof v === 'string') return v;
+    return new Intl.NumberFormat('ru-RU').format(Math.round(v));
+  }
+
+  window.rnpEditSettings = async function() {
+    currentModal = 'settings';
+    document.getElementById('rnpModalTitle').textContent = 'Настройки кабинета';
+    const s = rnpData.settings;
+    document.getElementById('rnpModalContent').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <label>УСН (доля): <input id="mUsnRate" type="number" step="0.01" value="${s.usn_rate}"></label>
+        <label>НДС (доля): <input id="mNdsRate" type="number" step="0.01" value="${s.nds_rate}"></label>
+        <label>Курс USD: <input id="mUsdRate" type="number" step="0.01" value="${s.usd_rate}"></label>
+        <label>Курс CNY: <input id="mCnyRate" type="number" step="0.01" value="${s.cny_rate}"></label>
+      </div>
+    `;
+    document.getElementById('rnpSettingsModal').style.display = 'block';
+  };
+
+  window.rnpEditCosts = async function() {
+    currentModal = 'costs';
+    document.getElementById('rnpModalTitle').textContent = 'Себестоимость по артикулам';
+    try {
+      const res = await fetch(`/api/rnp/costs?cabinet_id=${WB.cabinet}`);
+      const costs = await res.json();
+      let html = '<div id="rnpCostsList">';
+      costs.forEach(c => {
+        html += `<div style="display:flex;gap:5px;margin:3px 0;" data-id="${c.id}">
+          <input value="${c.supplier_article}" placeholder="Артикул" style="flex:1;">
+          <input type="number" value="${c.cost_rub}" placeholder="Себестоимость" style="width:100px;">
+          <button onclick="this.parentElement.remove()">✕</button>
+        </div>`;
+      });
+      html += '</div>';
+      html += '<button onclick="rnpAddCostRow()" style="margin-top:10px;">+ Добавить</button>';
+      document.getElementById('rnpModalContent').innerHTML = html;
+    } catch(e) {}
+    document.getElementById('rnpSettingsModal').style.display = 'block';
+  };
+
+  window.rnpEditFixedExpenses = async function() {
+    currentModal = 'fixed';
+    document.getElementById('rnpModalTitle').textContent = 'Постоянные расходы (₽/мес)';
+    try {
+      const res = await fetch(`/api/rnp/fixed-expenses?cabinet_id=${WB.cabinet}`);
+      const items = await res.json();
+      let html = '<div id="rnpFixedList">';
+      items.forEach(c => {
+        html += `<div style="display:flex;gap:5px;margin:3px 0;" data-id="${c.id}">
+          <input value="${c.name}" placeholder="Название" style="flex:1;">
+          <input type="number" value="${c.amount_monthly}" placeholder="₽/мес" style="width:120px;">
+          <button onclick="this.parentElement.remove()">✕</button>
+        </div>`;
+      });
+      html += '</div>';
+      html += '<button onclick="rnpAddFixedRow()" style="margin-top:10px;">+ Добавить</button>';
+      document.getElementById('rnpModalContent').innerHTML = html;
+    } catch(e) {}
+    document.getElementById('rnpSettingsModal').style.display = 'block';
+  };
+
+  window.rnpEditPlans = async function() {
+    currentModal = 'plans';
+    document.getElementById('rnpModalTitle').textContent = 'Месячные планы';
+    try {
+      const res = await fetch(`/api/rnp/plans?cabinet_id=${WB.cabinet}`);
+      const plans = await res.json();
+      let html = '<div id="rnpPlansList">';
+      plans.forEach(p => {
+        html += `<div style="display:flex;gap:5px;margin:3px 0;" data-id="${p.id}">
+          <input type="month" value="${p.month.substring(0,7)}" style="width:140px;">
+          <input type="number" value="${p.orders_amount}" placeholder="Заказы сумм" style="width:120px;">
+          <input type="number" value="${p.orders_count}" placeholder="Заказы шт" style="width:100px;">
+          <input type="number" value="${p.sales_minus_returns}" placeholder="Продажи" style="width:120px;">
+          <button onclick="this.parentElement.remove()">✕</button>
+        </div>`;
+      });
+      html += '</div>';
+      html += '<button onclick="rnpAddPlanRow()" style="margin-top:10px;">+ Добавить</button>';
+      document.getElementById('rnpModalContent').innerHTML = html;
+    } catch(e) {}
+    document.getElementById('rnpSettingsModal').style.display = 'block';
+  };
+
+  window.rnpAddCostRow = function() {
+    document.getElementById('rnpCostsList').insertAdjacentHTML('beforeend',
+      '<div style="display:flex;gap:5px;margin:3px 0;"><input placeholder="Артикул" style="flex:1;"><input type="number" placeholder="Себестоимость" style="width:100px;"><button onclick="this.parentElement.remove()">✕</button></div>');
+  };
+
+  window.rnpAddFixedRow = function() {
+    document.getElementById('rnpFixedList').insertAdjacentHTML('beforeend',
+      '<div style="display:flex;gap:5px;margin:3px 0;"><input placeholder="Название" style="flex:1;"><input type="number" placeholder="₽/мес" style="width:120px;"><button onclick="this.parentElement.remove()">✕</button></div>');
+  };
+
+  window.rnpAddPlanRow = function() {
+    document.getElementById('rnpPlansList').insertAdjacentHTML('beforeend',
+      '<div style="display:flex;gap:5px;margin:3px 0;"><input type="month" style="width:140px;"><input type="number" placeholder="Заказы сумм" style="width:120px;"><input type="number" placeholder="Заказы шт" style="width:100px;"><input type="number" placeholder="Продажи" style="width:120px;"><button onclick="this.parentElement.remove()">✕</button></div>');
+  };
+
+  window.rnpSaveModal = async function() {
+    if (currentModal === 'settings') {
+      const body = {
+        usn_rate: parseFloat(document.getElementById('mUsnRate').value),
+        nds_rate: parseFloat(document.getElementById('mNdsRate').value),
+        usd_rate: parseFloat(document.getElementById('mUsdRate').value),
+        cny_rate: parseFloat(document.getElementById('mCnyRate').value),
+      };
+      await fetch(`/api/rnp/settings?cabinet_id=${WB.cabinet}`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+      });
+    } else if (currentModal === 'costs') {
+      const items = [];
+      document.querySelectorAll('#rnpCostsList > div').forEach(el => {
+        const inputs = el.querySelectorAll('input');
+        if (inputs[0].value) items.push({ supplier_article: inputs[0].value, cost_rub: parseFloat(inputs[1].value)||0 });
+      });
+      await fetch(`/api/rnp/costs?cabinet_id=${WB.cabinet}`, {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(items)
+      });
+    } else if (currentModal === 'fixed') {
+      const items = [];
+      document.querySelectorAll('#rnpFixedList > div').forEach(el => {
+        const inputs = el.querySelectorAll('input');
+        if (inputs[0].value) items.push({ name: inputs[0].value, amount_monthly: parseFloat(inputs[1].value)||0 });
+      });
+      await fetch(`/api/rnp/fixed-expenses?cabinet_id=${WB.cabinet}`, {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(items)
+      });
+    } else if (currentModal === 'plans') {
+      const items = [];
+      document.querySelectorAll('#rnpPlansList > div').forEach(el => {
+        const inputs = el.querySelectorAll('input');
+        if (inputs[0].value) items.push({
+          month: inputs[0].value + '-01',
+          orders_amount: parseFloat(inputs[1].value)||0,
+          orders_count: parseInt(inputs[2].value)||0,
+          sales_minus_returns: parseFloat(inputs[3].value)||0,
+        });
+      });
+      await fetch(`/api/rnp/plans?cabinet_id=${WB.cabinet}`, {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(items)
+      });
+    }
+    rnpCloseModal();
+    rnpLoad();
+  };
+
+  window.rnpCloseModal = function() {
+    document.getElementById('rnpSettingsModal').style.display = 'none';
+    currentModal = null;
+  };
+
+  window.addEventListener('wb:tab-activated:rnp', rnpLoad);
+  window.addEventListener('wb:period-changed', function() {
+    if (loadedTabs.has('rnp')) rnpLoad();
+  });
+})();
+</script>

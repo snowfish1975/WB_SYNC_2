@@ -18,6 +18,7 @@ from app.database import engine, get_db
 from app.schemas import (
     ProductCharacteristicOut, SyncLogOut, TokenRequest, StockOut, OrderOut, PriceOut, SalesReportRowOut, SaleOut,
     UserCreate, UserUpdate, UserOut, ApiKeyCreate, ApiKeyOut, WbTokenCreate, WbTokenUpdate, WbTokenOut,
+    RnpSettingsUpdate, RnpCostIn, RnpFixedExpenseIn, RnpVariableExpenseIn, RnpLoanPaymentIn, RnpPlanIn,
 )
 from app.crud import (
     get_characteristics, get_sync_logs, get_stocks, get_orders,
@@ -30,6 +31,12 @@ from app.crud import (
     get_ad_campaigns, get_ad_stats, get_ad_expenses,
     get_stock_forecast, get_unit_economics,
     get_ad_search_clusters,
+    get_rnp_settings, upsert_rnp_settings,
+    get_rnp_costs, upsert_rnp_costs_bulk, delete_rnp_cost,
+    get_rnp_fixed_expenses, upsert_rnp_fixed_expenses_bulk, delete_rnp_fixed_expense,
+    get_rnp_variable_expenses, upsert_rnp_variable_expenses_bulk, delete_rnp_variable_expense,
+    get_rnp_loan_payments, upsert_rnp_loan_payments_bulk, delete_rnp_loan_payment,
+    get_rnp_plans, upsert_rnp_plans_bulk, delete_rnp_plan,
 )
 from app.models import User, ApiKey, WbToken, UserCabinetAccess
 from app.models import ProductCharacteristic, Stock, Order, Price, SalesReport, Sale
@@ -1621,3 +1628,195 @@ def dashboard_ad_search_clusters(
             "spend": r.spend,
         })
     return result
+
+
+# =====================
+# РНП — Настройки, себестоимость, расходы, планы
+# =====================
+
+
+@app.get("/api/rnp/settings")
+def rnp_get_settings(
+    request: Request,
+    cabinet_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    return get_rnp_settings(db, cabinet_id) or {"cabinet_id": cabinet_id, "usn_rate": 0.06, "nds_rate": 0.07}
+
+
+@app.put("/api/rnp/settings")
+def rnp_update_settings(
+    request: Request,
+    cabinet_id: str = Query(...),
+    body: RnpSettingsUpdate = ...,
+    db: Session = Depends(get_db),
+):
+    data = {k: v for k, v in body.model_dump().items() if v is not None}
+    upsert_rnp_settings(db, cabinet_id, data)
+    return {"ok": True}
+
+
+@app.get("/api/rnp/costs")
+def rnp_get_costs(
+    request: Request,
+    cabinet_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    return get_rnp_costs(db, cabinet_id)
+
+
+@app.post("/api/rnp/costs")
+def rnp_upsert_costs(
+    request: Request,
+    cabinet_id: str = Query(...),
+    items: list[RnpCostIn] = ...,
+    db: Session = Depends(get_db),
+):
+    upsert_rnp_costs_bulk(db, cabinet_id, [i.model_dump() for i in items])
+    return {"ok": True, "count": len(items)}
+
+
+@app.delete("/api/rnp/costs/{cost_id}")
+def rnp_delete_cost(
+    request: Request,
+    cabinet_id: str = Query(...),
+    cost_id: int = ...,
+    db: Session = Depends(get_db),
+):
+    delete_rnp_cost(db, cabinet_id, cost_id)
+    return {"ok": True}
+
+
+@app.get("/api/rnp/fixed-expenses")
+def rnp_get_fixed_expenses(
+    request: Request,
+    cabinet_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    return get_rnp_fixed_expenses(db, cabinet_id)
+
+
+@app.post("/api/rnp/fixed-expenses")
+def rnp_upsert_fixed_expenses(
+    request: Request,
+    cabinet_id: str = Query(...),
+    items: list[RnpFixedExpenseIn] = ...,
+    db: Session = Depends(get_db),
+):
+    upsert_rnp_fixed_expenses_bulk(db, cabinet_id, [i.model_dump() for i in items])
+    return {"ok": True, "count": len(items)}
+
+
+@app.delete("/api/rnp/fixed-expenses/{expense_id}")
+def rnp_delete_fixed_expense(
+    request: Request,
+    cabinet_id: str = Query(...),
+    expense_id: int = ...,
+    db: Session = Depends(get_db),
+):
+    delete_rnp_fixed_expense(db, cabinet_id, expense_id)
+    return {"ok": True}
+
+
+@app.get("/api/rnp/variable-expenses")
+def rnp_get_variable_expenses(
+    request: Request,
+    cabinet_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    return get_rnp_variable_expenses(db, cabinet_id)
+
+
+@app.post("/api/rnp/variable-expenses")
+def rnp_upsert_variable_expenses(
+    request: Request,
+    cabinet_id: str = Query(...),
+    items: list[RnpVariableExpenseIn] = ...,
+    db: Session = Depends(get_db),
+):
+    upsert_rnp_variable_expenses_bulk(db, cabinet_id, [i.model_dump() for i in items])
+    return {"ok": True, "count": len(items)}
+
+
+@app.delete("/api/rnp/variable-expenses/{expense_id}")
+def rnp_delete_variable_expense(
+    request: Request,
+    cabinet_id: str = Query(...),
+    expense_id: int = ...,
+    db: Session = Depends(get_db),
+):
+    delete_rnp_variable_expense(db, cabinet_id, expense_id)
+    return {"ok": True}
+
+
+@app.get("/api/rnp/loan-payments")
+def rnp_get_loan_payments(
+    request: Request,
+    cabinet_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    return get_rnp_loan_payments(db, cabinet_id)
+
+
+@app.post("/api/rnp/loan-payments")
+def rnp_upsert_loan_payments(
+    request: Request,
+    cabinet_id: str = Query(...),
+    items: list[RnpLoanPaymentIn] = ...,
+    db: Session = Depends(get_db),
+):
+    upsert_rnp_loan_payments_bulk(db, cabinet_id, [i.model_dump() for i in items])
+    return {"ok": True, "count": len(items)}
+
+
+@app.delete("/api/rnp/loan-payments/{payment_id}")
+def rnp_delete_loan_payment(
+    request: Request,
+    cabinet_id: str = Query(...),
+    payment_id: int = ...,
+    db: Session = Depends(get_db),
+):
+    delete_rnp_loan_payment(db, cabinet_id, payment_id)
+    return {"ok": True}
+
+
+@app.get("/api/rnp/plans")
+def rnp_get_plans(
+    request: Request,
+    cabinet_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    return get_rnp_plans(db, cabinet_id)
+
+
+@app.post("/api/rnp/plans")
+def rnp_upsert_plans(
+    request: Request,
+    cabinet_id: str = Query(...),
+    items: list[RnpPlanIn] = ...,
+    db: Session = Depends(get_db),
+):
+    upsert_rnp_plans_bulk(db, cabinet_id, [i.model_dump() for i in items])
+    return {"ok": True, "count": len(items)}
+
+
+@app.delete("/api/rnp/plans/{plan_id}")
+def rnp_delete_plan(
+    request: Request,
+    cabinet_id: str = Query(...),
+    plan_id: int = ...,
+    db: Session = Depends(get_db),
+):
+    delete_rnp_plan(db, cabinet_id, plan_id)
+    return {"ok": True}
+
+
+@app.get("/api/rnp/calc")
+def rnp_calc(
+    request: Request,
+    cabinet_id: str = Query(...),
+    days_back: int = Query(40),
+    db: Session = Depends(get_db),
+):
+    from app.rnp_calc import calc_rnp
+    return calc_rnp(db, cabinet_id, days_back)

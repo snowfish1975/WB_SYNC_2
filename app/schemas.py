@@ -161,6 +161,74 @@ class OrderOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# =====================
+# РНП SCHEMAS
+# =====================
+
+
+class RnpSettingsUpdate(BaseModel):
+    usn_rate: float | None = None
+    usn_rate_2025: float | None = None
+    nds_rate: float | None = None
+    nds_rate_2025: float | None = None
+    usd_rate: float | None = None
+    cny_rate: float | None = None
+    paid_acceptance_enabled: bool | None = None
+    localization_index: float | None = None
+
+
+class RnpCostIn(BaseModel):
+    supplier_article: str
+    cost_rub: float = 0
+    currency: str = "RUB"
+    manager: str | None = None
+    product_type: str | None = None
+    shipment_type: str | None = None
+    min_price: float | None = None
+    min_margin: float | None = None
+    target_margin: float | None = None
+    target_drr: float | None = None
+
+
+class RnpFixedExpenseIn(BaseModel):
+    name: str
+    amount_monthly: float = 0
+
+
+class RnpVariableExpenseIn(BaseModel):
+    source_article: str
+    name: str
+    percent: float = 0
+
+
+class RnpLoanPaymentIn(BaseModel):
+    name: str
+    amount_monthly: float = 0
+
+
+class RnpPlanIn(BaseModel):
+    month: str
+    orders_amount: float = 0
+    orders_count: int = 0
+    sales_minus_returns: float = 0
+    sales_count: int = 0
+    returns_count: int = 0
+    margin_rub: float = 0
+    margin_percent: float = 0
+    drr: float = 0
+    avg_price: float = 0
+    cost_of_goods: float = 0
+    logistics: float = 0
+    commission: float = 0
+    storage: float = 0
+    paid_acceptance: float = 0
+    promotion: float = 0
+    penalties: float = 0
+    nds: float = 0
+    profit: float = 0
+    spp: float = 0
+
+
 class PriceOut(BaseModel):
     id: int
     nm_id: int

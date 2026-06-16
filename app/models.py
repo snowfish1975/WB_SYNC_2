@@ -573,3 +573,126 @@ class AdSearchCluster(Base):
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
     __table_args__ = (UniqueConstraint("cabinet_id", "advert_id", "nm_id", "keyword", name="uq_ad_search_cluster"),)
+
+
+# =====================
+# РНП — Настройки кабинета
+# =====================
+
+
+class RnpSetting(Base):
+    """Настройки кабинета для расчёта РНП: себестоимость, статьи расходов, налоги."""
+    __tablename__ = "rnp_settings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+
+    usn_rate: Mapped[float] = mapped_column(Float, default=0.06)
+    usn_rate_2025: Mapped[float] = mapped_column(Float, default=0.06)
+    nds_rate: Mapped[float] = mapped_column(Float, default=0.07)
+    nds_rate_2025: Mapped[float] = mapped_column(Float, default=0.07)
+    usd_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    cny_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    paid_acceptance_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    localization_index: Mapped[float] = mapped_column(Float, default=1.0)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("cabinet_id", name="uq_rnp_settings_cabinet"),)
+
+
+class RnpCost(Base):
+    """Себестоимость/закупочная цена по артикулам для кабинета."""
+    __tablename__ = "rnp_costs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    supplier_article: Mapped[str] = mapped_column(String(200), nullable=False)
+    cost_rub: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(10), default="RUB")
+    manager: Mapped[str] = mapped_column(String(100), nullable=True)
+    product_type: Mapped[str] = mapped_column(String(100), nullable=True)
+    shipment_type: Mapped[str] = mapped_column(String(100), nullable=True)
+    min_price: Mapped[float] = mapped_column(Float, nullable=True)
+    min_margin: Mapped[float] = mapped_column(Float, nullable=True)
+    target_margin: Mapped[float] = mapped_column(Float, nullable=True)
+    target_drr: Mapped[float] = mapped_column(Float, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("cabinet_id", "supplier_article", name="uq_rnp_cost"),)
+
+
+class RnpFixedExpense(Base):
+    """Постоянные расходы продавца (₽/мес)."""
+    __tablename__ = "rnp_fixed_expenses"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    amount_monthly: Mapped[float] = mapped_column(Float, default=0.0)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("cabinet_id", "name", name="uq_rnp_fixed_expense"),)
+
+
+class RnpVariableExpense(Base):
+    """Переменные расходы продавца (% от статьи WB)."""
+    __tablename__ = "rnp_variable_expenses"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    source_article: Mapped[str] = mapped_column(String(200), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    percent: Mapped[float] = mapped_column(Float, default=0.0)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("cabinet_id", "name", name="uq_rnp_variable_expense"),)
+
+
+class RnpLoanPayment(Base):
+    """Возврат процентов по займам."""
+    __tablename__ = "rnp_loan_payments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    amount_monthly: Mapped[float] = mapped_column(Float, default=0.0)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("cabinet_id", "name", name="uq_rnp_loan_payment"),)
+
+
+# =====================
+# РНП — Планы
+# =====================
+
+
+class RnpPlan(Base):
+    """Месячные планы для кабинета."""
+    __tablename__ = "rnp_plans"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    month: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    orders_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    orders_count: Mapped[int] = mapped_column(Integer, default=0)
+    sales_minus_returns: Mapped[float] = mapped_column(Float, default=0.0)
+    sales_count: Mapped[int] = mapped_column(Integer, default=0)
+    returns_count: Mapped[int] = mapped_column(Integer, default=0)
+    margin_rub: Mapped[float] = mapped_column(Float, default=0.0)
+    margin_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    drr: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_price: Mapped[float] = mapped_column(Float, default=0.0)
+    cost_of_goods: Mapped[float] = mapped_column(Float, default=0.0)
+    logistics: Mapped[float] = mapped_column(Float, default=0.0)
+    commission: Mapped[float] = mapped_column(Float, default=0.0)
+    storage: Mapped[float] = mapped_column(Float, default=0.0)
+    paid_acceptance: Mapped[float] = mapped_column(Float, default=0.0)
+    promotion: Mapped[float] = mapped_column(Float, default=0.0)
+    penalties: Mapped[float] = mapped_column(Float, default=0.0)
+    nds: Mapped[float] = mapped_column(Float, default=0.0)
+    profit: Mapped[float] = mapped_column(Float, default=0.0)
+    spp: Mapped[float] = mapped_column(Float, default=0.0)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("cabinet_id", "month", name="uq_rnp_plan"),)

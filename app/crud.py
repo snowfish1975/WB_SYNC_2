@@ -1329,3 +1329,258 @@ def get_unit_economics(db: Session, cabinet_id: str | None = None, days_back: in
 
     result.sort(key=lambda x: x["net_profit"], reverse=True)
     return result
+
+
+# =====================
+# РНП — Настройки
+# =====================
+
+from app.models import RnpSetting, RnpCost, RnpFixedExpense, RnpVariableExpense, RnpLoanPayment, RnpPlan
+
+
+def get_rnp_settings(db: Session, cabinet_id: str) -> dict | None:
+    row = db.query(RnpSetting).filter(RnpSetting.cabinet_id == cabinet_id).first()
+    if not row:
+        return None
+    return {
+        "cabinet_id": row.cabinet_id,
+        "usn_rate": row.usn_rate,
+        "usn_rate_2025": row.usn_rate_2025,
+        "nds_rate": row.nds_rate,
+        "nds_rate_2025": row.nds_rate_2025,
+        "usd_rate": row.usd_rate,
+        "cny_rate": row.cny_rate,
+        "paid_acceptance_enabled": row.paid_acceptance_enabled,
+        "localization_index": row.localization_index,
+    }
+
+
+def upsert_rnp_settings(db: Session, cabinet_id: str, data: dict):
+    row = db.query(RnpSetting).filter(RnpSetting.cabinet_id == cabinet_id).first()
+    if row:
+        for k, v in data.items():
+            if k != "cabinet_id" and hasattr(row, k):
+                setattr(row, k, v)
+        row.updated_at = datetime.utcnow()
+    else:
+        row = RnpSetting(cabinet_id=cabinet_id, **{k: v for k, v in data.items() if k != "cabinet_id"})
+        db.add(row)
+    db.commit()
+
+
+def get_rnp_costs(db: Session, cabinet_id: str) -> list[dict]:
+    rows = db.query(RnpCost).filter(RnpCost.cabinet_id == cabinet_id).all()
+    return [{"id": r.id, "supplier_article": r.supplier_article, "cost_rub": r.cost_rub,
+             "currency": r.currency, "manager": r.manager, "product_type": r.product_type,
+             "shipment_type": r.shipment_type, "min_price": r.min_price,
+             "min_margin": r.min_margin, "target_margin": r.target_margin, "target_drr": r.target_drr}
+            for r in rows]
+
+
+def upsert_rnp_cost(db: Session, cabinet_id: str, item: dict):
+    stmt = pg_insert(RnpCost).values(
+        cabinet_id=cabinet_id,
+        supplier_article=item["supplier_article"],
+        cost_rub=item.get("cost_rub", 0),
+        currency=item.get("currency", "RUB"),
+        manager=item.get("manager"),
+        product_type=item.get("product_type"),
+        shipment_type=item.get("shipment_type"),
+        min_price=item.get("min_price"),
+        min_margin=item.get("min_margin"),
+        target_margin=item.get("target_margin"),
+        target_drr=item.get("target_drr"),
+    ).on_conflict_do_update(
+        constraint="uq_rnp_cost",
+        set_={
+            "cost_rub": item.get("cost_rub", 0),
+            "currency": item.get("currency", "RUB"),
+            "manager": item.get("manager"),
+            "product_type": item.get("product_type"),
+            "shipment_type": item.get("shipment_type"),
+            "min_price": item.get("min_price"),
+            "min_margin": item.get("min_margin"),
+            "target_margin": item.get("target_margin"),
+            "target_drr": item.get("target_drr"),
+            "updated_at": datetime.utcnow(),
+        },
+    )
+    db.execute(stmt)
+
+
+def upsert_rnp_costs_bulk(db: Session, cabinet_id: str, items: list[dict]):
+    for item in items:
+        upsert_rnp_cost(db, cabinet_id, item)
+    db.commit()
+
+
+def delete_rnp_cost(db: Session, cabinet_id: str, cost_id: int):
+    db.query(RnpCost).filter(RnpCost.id == cost_id, RnpCost.cabinet_id == cabinet_id).delete()
+    db.commit()
+
+
+def get_rnp_fixed_expenses(db: Session, cabinet_id: str) -> list[dict]:
+    rows = db.query(RnpFixedExpense).filter(RnpFixedExpense.cabinet_id == cabinet_id).all()
+    return [{"id": r.id, "name": r.name, "amount_monthly": r.amount_monthly} for r in rows]
+
+
+def upsert_rnp_fixed_expense(db: Session, cabinet_id: str, item: dict):
+    stmt = pg_insert(RnpFixedExpense).values(
+        cabinet_id=cabinet_id,
+        name=item["name"],
+        amount_monthly=item.get("amount_monthly", 0),
+    ).on_conflict_do_update(
+        constraint="uq_rnp_fixed_expense",
+        set_={"amount_monthly": item.get("amount_monthly", 0), "updated_at": datetime.utcnow()},
+    )
+    db.execute(stmt)
+
+
+def upsert_rnp_fixed_expenses_bulk(db: Session, cabinet_id: str, items: list[dict]):
+    for item in items:
+        upsert_rnp_fixed_expense(db, cabinet_id, item)
+    db.commit()
+
+
+def delete_rnp_fixed_expense(db: Session, cabinet_id: str, expense_id: int):
+    db.query(RnpFixedExpense).filter(RnpFixedExpense.id == expense_id, RnpFixedExpense.cabinet_id == cabinet_id).delete()
+    db.commit()
+
+
+def get_rnp_variable_expenses(db: Session, cabinet_id: str) -> list[dict]:
+    rows = db.query(RnpVariableExpense).filter(RnpVariableExpense.cabinet_id == cabinet_id).all()
+    return [{"id": r.id, "source_article": r.source_article, "name": r.name, "percent": r.percent} for r in rows]
+
+
+def upsert_rnp_variable_expense(db: Session, cabinet_id: str, item: dict):
+    stmt = pg_insert(RnpVariableExpense).values(
+        cabinet_id=cabinet_id,
+        source_article=item["source_article"],
+        name=item["name"],
+        percent=item.get("percent", 0),
+    ).on_conflict_do_update(
+        constraint="uq_rnp_variable_expense",
+        set_={"source_article": item["source_article"], "percent": item.get("percent", 0), "updated_at": datetime.utcnow()},
+    )
+    db.execute(stmt)
+
+
+def upsert_rnp_variable_expenses_bulk(db: Session, cabinet_id: str, items: list[dict]):
+    for item in items:
+        upsert_rnp_variable_expense(db, cabinet_id, item)
+    db.commit()
+
+
+def delete_rnp_variable_expense(db: Session, cabinet_id: str, expense_id: int):
+    db.query(RnpVariableExpense).filter(RnpVariableExpense.id == expense_id, RnpVariableExpense.cabinet_id == cabinet_id).delete()
+    db.commit()
+
+
+def get_rnp_loan_payments(db: Session, cabinet_id: str) -> list[dict]:
+    rows = db.query(RnpLoanPayment).filter(RnpLoanPayment.cabinet_id == cabinet_id).all()
+    return [{"id": r.id, "name": r.name, "amount_monthly": r.amount_monthly} for r in rows]
+
+
+def upsert_rnp_loan_payment(db: Session, cabinet_id: str, item: dict):
+    stmt = pg_insert(RnpLoanPayment).values(
+        cabinet_id=cabinet_id,
+        name=item["name"],
+        amount_monthly=item.get("amount_monthly", 0),
+    ).on_conflict_do_update(
+        constraint="uq_rnp_loan_payment",
+        set_={"amount_monthly": item.get("amount_monthly", 0), "updated_at": datetime.utcnow()},
+    )
+    db.execute(stmt)
+
+
+def upsert_rnp_loan_payments_bulk(db: Session, cabinet_id: str, items: list[dict]):
+    for item in items:
+        upsert_rnp_loan_payment(db, cabinet_id, item)
+    db.commit()
+
+
+def delete_rnp_loan_payment(db: Session, cabinet_id: str, payment_id: int):
+    db.query(RnpLoanPayment).filter(RnpLoanPayment.id == payment_id, RnpLoanPayment.cabinet_id == cabinet_id).delete()
+    db.commit()
+
+
+# =====================
+# РНП — Планы
+# =====================
+
+
+def get_rnp_plans(db: Session, cabinet_id: str) -> list[dict]:
+    rows = db.query(RnpPlan).filter(RnpPlan.cabinet_id == cabinet_id).order_by(RnpPlan.month).all()
+    return [{"id": r.id, "month": r.month.isoformat(),
+             "orders_amount": r.orders_amount, "orders_count": r.orders_count,
+             "sales_minus_returns": r.sales_minus_returns, "sales_count": r.sales_count,
+             "returns_count": r.returns_count, "margin_rub": r.margin_rub,
+             "margin_percent": r.margin_percent, "drr": r.drr, "avg_price": r.avg_price,
+             "cost_of_goods": r.cost_of_goods, "logistics": r.logistics,
+             "commission": r.commission, "storage": r.storage,
+             "paid_acceptance": r.paid_acceptance, "promotion": r.promotion,
+             "penalties": r.penalties, "nds": r.nds, "profit": r.profit, "spp": r.spp}
+            for r in rows]
+
+
+def upsert_rnp_plan(db: Session, cabinet_id: str, item: dict):
+    month_dt = item["month"] if isinstance(item["month"], datetime) else datetime.fromisoformat(item["month"].replace("Z", "+00:00").replace("+00:00", ""))
+    stmt = pg_insert(RnpPlan).values(
+        cabinet_id=cabinet_id,
+        month=month_dt,
+        orders_amount=item.get("orders_amount", 0),
+        orders_count=item.get("orders_count", 0),
+        sales_minus_returns=item.get("sales_minus_returns", 0),
+        sales_count=item.get("sales_count", 0),
+        returns_count=item.get("returns_count", 0),
+        margin_rub=item.get("margin_rub", 0),
+        margin_percent=item.get("margin_percent", 0),
+        drr=item.get("drr", 0),
+        avg_price=item.get("avg_price", 0),
+        cost_of_goods=item.get("cost_of_goods", 0),
+        logistics=item.get("logistics", 0),
+        commission=item.get("commission", 0),
+        storage=item.get("storage", 0),
+        paid_acceptance=item.get("paid_acceptance", 0),
+        promotion=item.get("promotion", 0),
+        penalties=item.get("penalties", 0),
+        nds=item.get("nds", 0),
+        profit=item.get("profit", 0),
+        spp=item.get("spp", 0),
+    ).on_conflict_do_update(
+        constraint="uq_rnp_plan",
+        set_={
+            "orders_amount": item.get("orders_amount", 0),
+            "orders_count": item.get("orders_count", 0),
+            "sales_minus_returns": item.get("sales_minus_returns", 0),
+            "sales_count": item.get("sales_count", 0),
+            "returns_count": item.get("returns_count", 0),
+            "margin_rub": item.get("margin_rub", 0),
+            "margin_percent": item.get("margin_percent", 0),
+            "drr": item.get("drr", 0),
+            "avg_price": item.get("avg_price", 0),
+            "cost_of_goods": item.get("cost_of_goods", 0),
+            "logistics": item.get("logistics", 0),
+            "commission": item.get("commission", 0),
+            "storage": item.get("storage", 0),
+            "paid_acceptance": item.get("paid_acceptance", 0),
+            "promotion": item.get("promotion", 0),
+            "penalties": item.get("penalties", 0),
+            "nds": item.get("nds", 0),
+            "profit": item.get("profit", 0),
+            "spp": item.get("spp", 0),
+            "updated_at": datetime.utcnow(),
+        },
+    )
+    db.execute(stmt)
+
+
+def upsert_rnp_plans_bulk(db: Session, cabinet_id: str, items: list[dict]):
+    for item in items:
+        upsert_rnp_plan(db, cabinet_id, item)
+    db.commit()
+
+
+def delete_rnp_plan(db: Session, cabinet_id: str, plan_id: int):
+    db.query(RnpPlan).filter(RnpPlan.id == plan_id, RnpPlan.cabinet_id == cabinet_id).delete()
+    db.commit()
