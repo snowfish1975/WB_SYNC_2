@@ -1820,3 +1820,15 @@ def rnp_calc(
 ):
     from app.rnp_calc import calc_rnp
     return calc_rnp(db, cabinet_id, days_back)
+
+
+@app.get("/api/rnp/calc-month")
+def rnp_calc_month(
+    request: Request,
+    cabinet_id: str = Query(...),
+    month: str = Query(..., description="YYYY-MM"),
+    comparison_mode: str = Query("day", description="day или week"),
+    db: Session = Depends(get_db),
+):
+    from app.rnp_calc import calc_rnp_month
+    return calc_rnp_month(db, cabinet_id, month, comparison_mode)

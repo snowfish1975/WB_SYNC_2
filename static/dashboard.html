@@ -56,24 +56,30 @@
 
 <!-- ============ НАВИГАЦИЯ ТАБОВ ============ -->
 <nav class="tabs-nav">
-  <button class="tab-btn" data-tab="summary"  onclick="switchTab('summary')">📊 Сводка</button>
-  <button class="tab-btn" data-tab="orders"   onclick="switchTab('orders')">🛒 Заказы</button>
-  <button class="tab-btn" data-tab="stocks"   onclick="switchTab('stocks')">📦 Остатки</button>
-  <button class="tab-btn" data-tab="top"      onclick="switchTab('top')">🏆 Топ товаров</button>
-  <button class="tab-btn" data-tab="report"   onclick="switchTab('report')">💰 Отчёт реализации</button>
-  <button class="tab-btn" data-tab="shelf"    onclick="switchTab('shelf')">🏪 Витрина</button>
-  <button class="tab-btn" data-tab="funnel"   onclick="switchTab('funnel')">🔄 Конверсия</button>
-  <button class="tab-btn" data-tab="stock-offices" onclick="switchTab('stock-offices')">🏭 Склады</button>
-  <button class="tab-btn" data-tab="item-ratings"  onclick="switchTab('item-ratings')">⭐ Оценки</button>
-  <button class="tab-btn" data-tab="ad"    onclick="switchTab('ad')">📢 Реклама</button>
-  <button class="tab-btn" data-tab="chars"    onclick="switchTab('chars')">📋 Характеристики</button>
-  <button class="tab-btn" data-tab="abcxyz"   onclick="switchTab('abcxyz')">📐 ABC/XYZ</button>
-  <button class="tab-btn" data-tab="stock-forecast" onclick="switchTab('stock-forecast')">📉 Прогноз</button>
-  <button class="tab-btn" data-tab="unit-economics" onclick="switchTab('unit-economics')">💰 Юнит-экономика</button>
-  <button class="tab-btn" data-tab="search-clusters" onclick="switchTab('search-clusters')">🔍 Поиск</button>
-  <button class="tab-btn" data-tab="rnp" onclick="switchTab('rnp')">🎯 РНП</button>
-  <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')">👤 Профиль</button>
-  <button class="tab-btn" data-tab="admin" onclick="switchTab('admin')" id="adminTab" style="display:none">⚙ Управление</button>
+  <div class="tabs-row">
+    <span class="tabs-label">Аналитика</span>
+    <button class="tab-btn" data-tab="summary"  onclick="switchTab('summary')">📊 Сводка</button>
+    <button class="tab-btn" data-tab="rnp" onclick="switchTab('rnp')">🎯 РНП</button>
+    <button class="tab-btn" data-tab="abcxyz"   onclick="switchTab('abcxyz')">📐 ABC/XYZ</button>
+    <button class="tab-btn" data-tab="shelf"    onclick="switchTab('shelf')">🏪 Витрина</button>
+    <button class="tab-btn" data-tab="funnel"   onclick="switchTab('funnel')">🔄 Конверсия</button>
+    <button class="tab-btn" data-tab="stock-forecast" onclick="switchTab('stock-forecast')">📉 Прогноз</button>
+    <button class="tab-btn" data-tab="unit-economics" onclick="switchTab('unit-economics')">💰 Юнит-экономика</button>
+    <button class="tab-btn" data-tab="search-clusters" onclick="switchTab('search-clusters')">🔍 Поиск</button>
+  </div>
+  <div class="tabs-row">
+    <span class="tabs-label">Данные</span>
+    <button class="tab-btn" data-tab="orders"   onclick="switchTab('orders')">🛒 Заказы</button>
+    <button class="tab-btn" data-tab="stocks"   onclick="switchTab('stocks')">📦 Остатки</button>
+    <button class="tab-btn" data-tab="top"      onclick="switchTab('top')">🏆 Топ товаров</button>
+    <button class="tab-btn" data-tab="report"   onclick="switchTab('report')">💰 Отчёт реализации</button>
+    <button class="tab-btn" data-tab="stock-offices" onclick="switchTab('stock-offices')">🏭 Склады</button>
+    <button class="tab-btn" data-tab="item-ratings"  onclick="switchTab('item-ratings')">⭐ Оценки</button>
+    <button class="tab-btn" data-tab="ad"    onclick="switchTab('ad')">📢 Реклама</button>
+    <button class="tab-btn" data-tab="chars"    onclick="switchTab('chars')">📋 Характеристики</button>
+    <button class="tab-btn" data-tab="profile" onclick="switchTab('profile')">👤 Профиль</button>
+    <button class="tab-btn" data-tab="admin" onclick="switchTab('admin')" id="adminTab" style="display:none">⚙ Управление</button>
+  </div>
 </nav>
 
 <!-- ============ КОНТЕНТ ТАБОВ ============ -->

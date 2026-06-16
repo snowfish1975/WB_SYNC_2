@@ -143,20 +143,39 @@ body {
 /* ---- ТАБЫ ---- */
 .tabs-nav {
   display: flex;
-  gap: 2px;
+  flex-direction: column;
+  gap: 0;
   padding: 0 32px;
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
+}
+.tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   overflow-x: auto;
 }
+.tabs-row + .tabs-row {
+  border-top: 1px solid var(--border);
+}
+.tabs-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 0 8px 0 0;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 .tab-btn {
-  padding: 12px 20px;
+  padding: 10px 16px;
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text2);
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 1px;
   cursor: pointer;
   transition: all 0.15s;
