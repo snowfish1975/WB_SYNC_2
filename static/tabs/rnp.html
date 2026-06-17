@@ -11,6 +11,17 @@
     <div id="rnpErrorMsg" style="font-size:12px;color:var(--text2);margin-top:8px;white-space:pre-wrap;"></div>
   </div>
   <div id="rnpContent" style="display:none;">
+    <!-- Сводка метрик -->
+    <div class="card section-mb">
+      <div class="section-title" id="rnpSummaryTitle">Сводка метрик</div>
+      <div class="table-wrap" style="overflow-x:auto;">
+        <table style="font-size:12px;">
+          <thead id="rnpSummaryHead"></thead>
+          <tbody id="rnpSummaryBody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="card section-mb">
       <div class="filters" style="flex-wrap:wrap;gap:12px;align-items:center;">
         <label style="font-size:12px;color:var(--text2);">Месяц:</label>
@@ -22,27 +33,6 @@
         </select>
         <button class="filter-btn" onclick="rnpLoadMonth()">Обновить</button>
         <span id="rnpPeriodInfo" style="font-size:11px;color:var(--text3);margin-left:8px;"></span>
-      </div>
-    </div>
-
-    <!-- Сводка метрик -->
-    <div class="card section-mb">
-      <div class="section-title">Сводка метрик</div>
-      <div class="table-wrap" style="overflow-x:auto;">
-        <table style="font-size:12px;">
-          <thead><tr>
-            <th style="min-width:140px;">Показатель</th>
-            <th style="text-align:right;min-width:80px;">Факт</th>
-            <th style="text-align:right;min-width:70px;">Δ</th>
-            <th style="text-align:right;min-width:55px;">Δ%</th>
-            <th style="width:6px;background:transparent;"></th>
-            <th style="min-width:140px;">Показатель</th>
-            <th style="text-align:right;min-width:80px;">Факт</th>
-            <th style="text-align:right;min-width:70px;">Δ</th>
-            <th style="text-align:right;min-width:55px;">Δ%</th>
-          </tr></thead>
-          <tbody id="rnpSummaryBody"></tbody>
-        </table>
       </div>
     </div>
 
@@ -67,14 +57,7 @@
       <div id="rnpOrdersDetail" style="display:none;">
         <div class="table-wrap" style="overflow-x:auto;">
           <table style="font-size:12px;">
-            <thead><tr>
-              <th style="min-width:200px;">Показатель</th>
-              <th style="text-align:right;">Месяц (факт)</th>
-              <th style="text-align:right;">План</th>
-              <th style="text-align:right;">%</th>
-              <th style="text-align:right;">Неделя</th>
-              <th id="rnpOrdersDailyHead" style="text-align:right;"></th>
-            </tr></thead>
+            <thead id="rnpOrdersHead"></thead>
             <tbody id="rnpOrdersBody"></tbody>
           </table>
         </div>
@@ -87,14 +70,7 @@
       <div id="rnpSalesDetail" style="display:none;">
         <div class="table-wrap" style="overflow-x:auto;">
           <table style="font-size:12px;">
-            <thead><tr>
-              <th style="min-width:200px;">Показатель</th>
-              <th style="text-align:right;">Месяц (факт)</th>
-              <th style="text-align:right;">План</th>
-              <th style="text-align:right;">%</th>
-              <th style="text-align:right;">Неделя</th>
-              <th id="rnpSalesDailyHead" style="text-align:right;"></th>
-            </tr></thead>
+            <thead id="rnpSalesHead"></thead>
             <tbody id="rnpSalesBody"></tbody>
           </table>
         </div>
@@ -150,6 +126,12 @@
     return new Intl.NumberFormat('ru-RU').format(Math.round(v));
   }
 
+  function P(v) {
+    if (v === null || v === undefined) return '\u2014';
+    if (typeof v === 'string') return v;
+    return (Math.round(v * 10) / 10) + '%';
+  }
+
   function dH(d) {
     if (!d) return '<td></td><td></td>';
     var v = d.delta || 0, p = d.delta_pct || 0;
@@ -186,27 +168,59 @@
     renderOrdersDetail(); renderSalesDetail(); renderRelative(); renderPnl(); renderSettings();
     var pp = rnpData.comparison_period || {};
     document.getElementById('rnpPeriodInfo').textContent = rnpData.month + ' | Сравнение: ' + (pp.start||'—') + ' — ' + (pp.end||'—') + ' | Дней: ' + rnpData.daily.length;
+    document.getElementById('rnpSummaryTitle').textContent = 'Сводка метрик за ' + rnpData.month;
   }
 
   function renderSummary() {
     var s = rnpData.summary;
-    var cfg = [
-      [['orders_amount','Заказы, сумм',0], ['platform_pct','Доля расходов площадки',1], null, ['sales_amount','Продажи, сумм',0], ['return_amount','Возвраты, сумм',0], ['wb_expenses','Расходы площадки',0], ['wb_expenses_pct','Доля расх. площадки',1]],
-      [['avg_check','Средний чек',0], ['cost_pct','Доля себестоимости',1], null, ['sales_count','Продажи, шт',0], ['return_count','Возвраты, шт',0], ['cost_of_goods','Себестоимость',0], ['cost_of_goods_pct','Доля себестоим.',1]],
-      [['net_profit_forecast','Чистая прибыль (прогноз)',0], ['commission_pct','Доля комиссии',1], null, ['net_profit','Чистая прибыль',0], ['usn','Налог',0], ['commission','Комиссия',0], ['commission_pct_row','Доля комиссии',1]],
-      [['profitability','Рентабельность (прогноз)',2], ['logistics_pct','Доля логистики',1], null, ['profitability_actual','Рентабельность',2], ['acceptance','Платная приемка',0], ['delivery','Логистика',0], ['delivery_pct','Доля логистики',1]],
-      [['ad_spend','Рекламный бюджет',0], ['storage_pct','Доля хранения',1], null, ['to_supplier','К перечислению продавцу',0], ['penalties','Удержания',0], ['storage','Хранение',0], ['storage_pct_row','Доля хранения',1]],
-      [['orders_count','Заказы, шт',0], ['promotion_pct','Доля рекламы',1], null, ['to_rs','К перечислению на РС',0], ['ad_spend_promo','Штрафы',0], ['promotion','Рекламный бюджет',0], ['promotion_pct_row','Доля рекламы',1]]
+    var thCols = '';
+    for (var b = 0; b < 3; b++) {
+      if (b > 0) thCols += '<th style="width:4px;background:transparent;border:none;"></th>';
+      thCols += '<th style="min-width:130px;">Показатель</th><th style="text-align:right;min-width:75px;">Факт</th><th style="text-align:right;min-width:60px;">Δ</th><th style="text-align:right;min-width:50px;">Δ%</th>';
+    }
+    document.getElementById('rnpSummaryHead').innerHTML = '<tr>' + thCols + '</tr>';
+    var b1 = [
+      ['orders_amount','Заказы, сумм (до СПП)',0],
+      ['orders_count','Заказы, шт',0],
+      ['avg_check','Средний чек',0],
+      ['spp_pct','СПП',1],
+      ['sales_amount','Продажи (прогноз выкупа)',0],
+      ['sales_count','Продажи, шт',0],
+      ['buyout_pct','% выкупа',1],
+      ['return_amount','Возвраты, сумм',0],
+      ['return_count','Возвраты, шт',0]
     ];
+    var b2 = [
+      ['cost_of_goods','Себестоимость',0],
+      ['commission','Комиссия',0],
+      ['delivery','Логистика',0],
+      ['storage','Хранение',0],
+      ['acceptance','Платная приемка',0],
+      ['ad_spend','Рекламный бюджет',0],
+      ['promotion','Продвижение',0],
+      ['penalties','Штрафы',0],
+      ['wb_expenses','Итого расходы WB',0]
+    ];
+    var b3 = [
+      ['gross_margin','Валовая маржа',0],
+      ['taxes','Налоги (УСН + НДС)',0],
+      ['net_profit','Чистая прибыль',0],
+      ['profitability','Рентабельность',2],
+      ['to_supplier','К перечислению продавцу',0],
+      ['to_rs','К перечислению на РС',0]
+    ];
+    var maxLen = Math.max(b1.length, b2.length, b3.length);
     var html = '';
-    for (var i = 0; i < cfg.length; i++) {
+    for (var i = 0; i < maxLen; i++) {
       html += '<tr>';
-      for (var j = 0; j < cfg[i].length; j++) {
-        var c = cfg[i][j];
-        if (c === null) { html += '<td style="width:6px;border:none;"></td>'; continue; }
-        var key = c[0], label = c[1], type = c[2];
+      var blocks = [b1, b2, b3];
+      for (var b = 0; b < 3; b++) {
+        if (b > 0) html += '<td style="width:4px;background:transparent;border:none;"></td>';
+        var m = blocks[b][i];
+        if (!m) { html += '<td colspan="4"></td>'; continue; }
+        var key = m[0], label = m[1], type = m[2];
         var d = s[key] || {value:0, delta:0, delta_pct:0};
-        var val = type >= 1 ? d.value + '%' : F(d.value);
+        var val = type === 2 ? (Math.round(d.value * 10) / 10) + '%' : type === 1 ? (Math.round(d.value * 10) / 10) + '%' : F(d.value);
         html += '<td style="font-weight:600;white-space:nowrap;">' + label + '</td>';
         html += '<td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;font-weight:500;">' + val + '</td>';
         html += dH(d);
@@ -236,79 +250,180 @@
     document.getElementById('rnpBottomProducts').innerHTML = h || '<tr><td colspan="3">\u2014</td></tr>';
   }
 
-  function dr(label, fact, planVal, weekVal, dayVal) {
+  function dr(label, fact, planVal, weekVals, dayVals) {
     var fv = F(fact);
-    var pv = '', pct = '', wv = F(weekVal), dv = F(dayVal);
+    var pv = '', pct = '';
     if (planVal !== undefined && planVal !== null && planVal !== 0) {
       pv = F(planVal);
       if (typeof fact === 'number' && typeof planVal === 'number' && planVal !== 0) pct = ((fact / planVal) * 100).toFixed(1) + '%';
     }
-    return '<tr><td>' + label + '</td><td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;">' + fv + '</td><td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;">' + pv + '</td><td style="text-align:right;">' + pct + '</td><td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;">' + wv + '</td><td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;">' + dv + '</td></tr>';
+    var h = '<tr><td style="white-space:nowrap;">' + label + '</td>';
+    h += '<td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;">' + fv + '</td>';
+    h += '<td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;">' + pv + '</td>';
+    h += '<td style="text-align:right;">' + pct + '</td>';
+    for (var i = 0; i < weekVals.length; i++) {
+      h += '<td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;font-size:11px;">' + F(weekVals[i]) + '</td>';
+    }
+    for (var i = 0; i < dayVals.length; i++) {
+      h += '<td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;font-size:11px;">' + F(dayVals[i]) + '</td>';
+    }
+    h += '</tr>';
+    return h;
+  }
+
+  function buildDetailHeader(daily, weekly) {
+    var h = '<tr><th style="min-width:180px;">Показатель</th><th style="text-align:right;">Месяц</th><th style="text-align:right;">План</th><th style="text-align:right;">%</th>';
+    for (var i = weekly.length - 1; i >= 0; i--) {
+      var si = i * 7, ei = Math.min(si + 6, daily.length - 1);
+      var sd = daily[si] ? daily[si].date.substring(8, 10) : '';
+      var ed = daily[ei] ? daily[ei].date.substring(8, 10) : '';
+      h += '<th style="text-align:right;font-size:10px;white-space:nowrap;">' + sd + '\u2013' + ed + '</th>';
+    }
+    for (var i = daily.length - 1; i >= 0; i--) {
+      h += '<th style="text-align:right;font-size:10px;">' + daily[i].date.substring(8, 10) + '</th>';
+    }
+    h += '</tr>';
+    return h;
   }
 
   function renderOrdersDetail() {
     var t = rnpData.totals, p = rnpData.plan || {};
-    var w = rnpData.weekly && rnpData.weekly.length ? rnpData.weekly[rnpData.weekly.length - 1] : {};
-    var lastDay = rnpData.daily && rnpData.daily.length ? rnpData.daily[rnpData.daily.length - 1] : {};
-    var hdr = lastDay.date || '';
-    document.getElementById('rnpOrdersDailyHead').textContent = hdr;
+    var daily = rnpData.daily || [], weekly = rnpData.weekly || [];
+    document.getElementById('rnpOrdersHead').innerHTML = buildDetailHeader(daily, weekly);
+    var wA=function(i){return weekly[i]?weekly[i].orders_amount:undefined;};
+    var dA=function(i){return daily[i]?daily[i].order_sum:undefined;};
+    var wC=function(i){return weekly[i]?weekly[i].orders_count:undefined;};
+    var dC=function(i){return daily[i]?daily[i].order_count:undefined;};
+    var wAC=function(i){return weekly[i]?weekly[i].avg_check_orders:undefined;};
+    var dAC=function(i){return daily[i]?daily[i].avg_check_orders:undefined;};
+    var wS=function(i){return weekly[i]?weekly[i].spp_pct:undefined;};
+    var dS=function(i){return daily[i]?daily[i].spp_pct:undefined;};
+    var wAd=function(i){return weekly[i]?weekly[i].ad_spend:undefined;};
+    var dAd=function(i){return daily[i]?daily[i].ad_spend:undefined;};
+    var wDRR=function(i){return weekly[i]?weekly[i].drr:undefined;};
+    var dDRR=function(i){return daily[i]?daily[i].drr:undefined;};
+    var wSA=function(i){return weekly[i]?weekly[i].sales_amount:undefined;};
+    var dSA=function(i){return daily[i]?daily[i].sales_amount:undefined;};
+    var wBE=function(i){return weekly[i]?(weekly[i].wb_expenses_total||0):undefined;};
+    var dBE=function(i){return daily[i]?daily[i].wb_expenses_total:undefined;};
+    var wD=function(i){return weekly[i]?weekly[i].delivery:undefined;};
+    var dD=function(i){return daily[i]?daily[i].delivery:undefined;};
+    var wCo=function(i){return weekly[i]?weekly[i].commission:undefined;};
+    var dCo=function(i){return daily[i]?daily[i].commission:undefined;};
+    var wSt=function(i){return weekly[i]?weekly[i].storage:undefined;};
+    var dSt=function(i){return daily[i]?daily[i].storage:undefined;};
+    var wAc=function(i){return weekly[i]?weekly[i].acceptance:undefined;};
+    var dAc=function(i){return daily[i]?daily[i].acceptance:undefined;};
+    var wP=function(i){return weekly[i]?weekly[i].promotion:undefined;};
+    var dP=function(i){return daily[i]?daily[i].promotion:undefined;};
+    var wPe=function(i){return weekly[i]?weekly[i].penalties:undefined;};
+    var dPe=function(i){return daily[i]?daily[i].penalties:undefined;};
+    var wCG=function(i){return weekly[i]?weekly[i].cost_of_goods:undefined;};
+    var dCG=function(i){return daily[i]?daily[i].cost_of_goods:undefined;};
+    var wa=[],da=[],wc=[],dc=[],wac=[],dac=[],ws=[],ds=[],wad=[],dad=[],wdr=[],ddr=[],wsa=[],dsa=[],wbe=[],dbe=[],wd=[],dd=[],wco=[],dco=[],wst=[],dst=[],wac2=[],dac2=[],wp=[],dp=[],wpe=[],dpe=[],wcg=[],dcg=[];
+    for(var i=weekly.length-1;i>=0;i--){wa.push(wA(i));wc.push(wC(i));wac.push(wAC(i));ws.push(wS(i));wad.push(wAd(i));wdr.push(wDRR(i));wsa.push(wSA(i));wbe.push(wBE(i));wd.push(wD(i));wco.push(wCo(i));wst.push(wSt(i));wac2.push(wAc(i));wp.push(wP(i));wpe.push(wPe(i));wcg.push(wCG(i));}
+    for(var i=daily.length-1;i>=0;i--){da.push(dA(i));dc.push(dC(i));dac.push(dAC(i));ds.push(dS(i));dad.push(dAd(i));ddr.push(dDRR(i));dsa.push(dSA(i));dbe.push(dBE(i));dd.push(dD(i));dco.push(dCo(i));dst.push(dSt(i));dac2.push(dAc(i));dp.push(dP(i));dpe.push(dPe(i));dcg.push(dCG(i));}
     var h = '';
-    h += dr('Заказы, сумм (до СПП)', t.orders_amount, p.orders_amount, w.orders_amount, lastDay.order_sum);
-    h += dr('Заказы, шт', t.orders_count, p.orders_count, w.orders_count, lastDay.order_count);
-    h += dr('Средний чек, заказы', t.avg_check_orders, p.avg_price, w.avg_check_orders, lastDay.avg_check_orders);
-    h += dr('СПП', t.spp_pct+'%', null, w.spp_pct+'%', lastDay.spp_pct+'%');
-    h += dr('Рекламный бюджет', t.ad_spend, null, w.ad_spend, lastDay.ad_spend);
-    h += dr('ДРР по заказам', t.drr+'%', p.drr?(p.drr*100)+'%':null, w.drr+'%', lastDay.drr+'%');
-    h += dr('Прогноз выкупа, сумм', t.sales_amount, p.sales_minus_returns, w.sales_amount, lastDay.sales_amount);
-    h += dr('Прямые расходы площадки', -t.wb_expenses_total, null, -(w.wb_expenses_total||0), -lastDay.wb_expenses_total);
-    h += dr('Логистика', -t.delivery, p.logistics?-p.logistics:null, -(w.delivery||0), -lastDay.delivery);
-    h += dr('Комиссия', -t.commission, p.commission?-p.commission:null, -(w.commission||0), -lastDay.commission);
-    h += dr('Хранение', -t.storage, p.storage?-p.storage:null, -(w.storage||0), -lastDay.storage);
-    h += dr('Платная приемка', -t.acceptance, null, -(w.acceptance||0), -lastDay.acceptance);
-    h += dr('Продвижение', -t.promotion, null, -(w.promotion||0), -lastDay.promotion);
-    h += dr('Штрафы', -t.penalties, null, -(w.penalties||0), -lastDay.penalties);
-    h += dr('Себестоимость', -t.cost_of_goods, p.cost_of_goods?-p.cost_of_goods:null, -(w.cost_of_goods||0), -lastDay.cost_of_goods);
+    h += dr('Заказы, сумм (до СПП)', t.orders_amount, p.orders_amount, wa, da);
+    h += dr('Заказы, шт', t.orders_count, p.orders_count, wc, dc);
+    h += dr('Средний чек, заказы', t.avg_check_orders, p.avg_price, wac, dac);
+    h += dr('СПП', P(t.spp_pct), null, ws.map(function(v){return v!=null?P(v):null;}), ds.map(function(v){return v!=null?P(v):null;}));
+    h += dr('Рекламный бюджет', t.ad_spend, null, wad, dad);
+    h += dr('ДРР по заказам', P(t.drr), p.drr?P(p.drr*100):null, wdr.map(function(v){return v!=null?P(v):null;}), ddr.map(function(v){return v!=null?P(v):null;}));
+    h += dr('Прогноз выкупа, сумм', t.sales_amount, p.sales_minus_returns, wsa, dsa);
+    h += dr('Прямые расходы площадки', -t.wb_expenses_total, null, wbe.map(function(v){return v!=null?-v:undefined;}), dbe.map(function(v){return v!=null?-v:undefined;}));
+    h += dr('Логистика', -t.delivery, p.logistics?-p.logistics:null, wd.map(function(v){return v!=null?-v:undefined;}), dd.map(function(v){return v!=null?-v:undefined;}));
+    h += dr('Комиссия', -t.commission, p.commission?-p.commission:null, wco.map(function(v){return v!=null?-v:undefined;}), dco.map(function(v){return v!=null?-v:undefined;}));
+    h += dr('Хранение', -t.storage, p.storage?-p.storage:null, wst.map(function(v){return v!=null?-v:undefined;}), dst.map(function(v){return v!=null?-v:undefined;}));
+    h += dr('Платная приемка', -t.acceptance, null, wac2.map(function(v){return v!=null?-v:undefined;}), dac2.map(function(v){return v!=null?-v:undefined;}));
+    h += dr('Продвижение', -t.promotion, null, wp.map(function(v){return v!=null?-v:undefined;}), dp.map(function(v){return v!=null?-v:undefined;}));
+    h += dr('Штрафы', -t.penalties, null, wpe.map(function(v){return v!=null?-v:undefined;}), dpe.map(function(v){return v!=null?-v:undefined;}));
+    h += dr('Себестоимость', -t.cost_of_goods, p.cost_of_goods?-p.cost_of_goods:null, wcg.map(function(v){return v!=null?-v:undefined;}), dcg.map(function(v){return v!=null?-v:undefined;}));
     document.getElementById('rnpOrdersBody').innerHTML = h;
   }
 
   function renderSalesDetail() {
     var t = rnpData.totals, p = rnpData.plan || {};
-    var w = rnpData.weekly && rnpData.weekly.length ? rnpData.weekly[rnpData.weekly.length - 1] : {};
-    var lastDay = rnpData.daily && rnpData.daily.length ? rnpData.daily[rnpData.daily.length - 1] : {};
-    var hdr = lastDay.date || '';
-    document.getElementById('rnpSalesDailyHead').textContent = hdr;
-    var gross = t.sales_amount - t.wb_expenses_total - t.cost_of_goods;
-    var wg = (w.sales_amount||0) - (w.wb_expenses_total||0) - (w.cost_of_goods||0);
-    var dg = lastDay.sales_amount - lastDay.wb_expenses_total - lastDay.cost_of_goods;
+    var daily = rnpData.daily || [], weekly = rnpData.weekly || [];
+    document.getElementById('rnpSalesHead').innerHTML = buildDetailHeader(daily, weekly);
+    var wA=function(i){return weekly[i]?weekly[i].orders_amount:undefined;};
+    var dA=function(i){return daily[i]?daily[i].order_sum:undefined;};
+    var wSC=function(i){return weekly[i]?weekly[i].sales_count:undefined;};
+    var dSC=function(i){return daily[i]?daily[i].sales_count:undefined;};
+    var wACS=function(i){return weekly[i]?weekly[i].avg_check_sales:undefined;};
+    var dACS=function(i){return daily[i]?daily[i].avg_check_sales:undefined;};
+    var wOC=function(i){return weekly[i]?weekly[i].order_cancel:undefined;};
+    var dOC=function(i){return daily[i]?daily[i].order_cancel:undefined;};
+    var wBP=function(i){return weekly[i]?weekly[i].buyout_pct:undefined;};
+    var dBP=function(i){return daily[i]?daily[i].buyout_pct:undefined;};
+    var wRA=function(i){return weekly[i]?weekly[i].return_amount:undefined;};
+    var dRA=function(i){return daily[i]?daily[i].return_amount:undefined;};
+    var wRC=function(i){return weekly[i]?weekly[i].return_count:undefined;};
+    var dRC=function(i){return daily[i]?daily[i].return_count:undefined;};
+    var wTS=function(i){return weekly[i]?weekly[i].to_supplier:undefined;};
+    var dTS=function(i){return daily[i]?daily[i].to_supplier:undefined;};
+    var wD=function(i){return weekly[i]?weekly[i].delivery:undefined;};
+    var dD=function(i){return daily[i]?daily[i].delivery:undefined;};
+    var wCo=function(i){return weekly[i]?weekly[i].commission:undefined;};
+    var dCo=function(i){return daily[i]?daily[i].commission:undefined;};
+    var wSt=function(i){return weekly[i]?weekly[i].storage:undefined;};
+    var dSt=function(i){return daily[i]?daily[i].storage:undefined;};
+    var wAc=function(i){return weekly[i]?weekly[i].acceptance:undefined;};
+    var dAc=function(i){return daily[i]?daily[i].acceptance:undefined;};
+    var wPr=function(i){return weekly[i]?weekly[i].promotion:undefined;};
+    var dPr=function(i){return daily[i]?daily[i].promotion:undefined;};
+    var wPe=function(i){return weekly[i]?weekly[i].penalties:undefined;};
+    var dPe=function(i){return daily[i]?daily[i].penalties:undefined;};
+    var wCG=function(i){return weekly[i]?weekly[i].cost_of_goods:undefined;};
+    var dCG=function(i){return daily[i]?daily[i].cost_of_goods:undefined;};
+    var wU=function(i){return weekly[i]?weekly[i].usn:undefined;};
+    var dU=function(i){return daily[i]?daily[i].usn:undefined;};
+    var wN=function(i){return weekly[i]?weekly[i].nds:undefined;};
+    var dN=function(i){return daily[i]?daily[i].nds:undefined;};
+    var wRS=function(i){return weekly[i]?weekly[i].to_rs:undefined;};
+    var dRS=function(i){return daily[i]?daily[i].to_rs:undefined;};
+    var wSA=function(i){return weekly[i]?weekly[i].sales_amount:undefined;};
+    var dSA=function(i){return daily[i]?daily[i].sales_amount:undefined;};
+    var wNP=function(i){return weekly[i]?weekly[i].net_profit:undefined;};
+    var dNP=function(i){return daily[i]?daily[i].net_profit:undefined;};
+    var wPR=function(i){return weekly[i]?weekly[i].profitability:undefined;};
+    var dPR=function(i){return daily[i]?daily[i].profitability:undefined;};
+    var wa=[],da=[],wsc=[],dsc=[],wacs=[],dacs=[],woc=[],doc=[],wbp=[],dbp=[],wra=[],dra=[],wrc=[],drc=[],wts=[],dts=[],wd=[],dd=[],wco=[],dco=[],wst=[],dst=[],wac=[],dac=[],wpr=[],dpr=[],wpe=[],dpe=[],wcg=[],dcg=[],wu=[],du=[],wn=[],dn=[],wrs=[],drs=[],wsa=[],dsa=[],wnp=[],dnp=[],wpr2=[],dpr2=[];
+    for(var i=weekly.length-1;i>=0;i--){wa.push(wA(i));wsc.push(wSC(i));wacs.push(wACS(i));woc.push(wOC(i));wbp.push(wBP(i));wra.push(wRA(i));wrc.push(wRC(i));wts.push(wTS(i));wd.push(wD(i));wco.push(wCo(i));wst.push(wSt(i));wac.push(wAc(i));wpr.push(wPr(i));wpe.push(wPe(i));wcg.push(wCG(i));wu.push(wU(i));wn.push(wN(i));wrs.push(wRS(i));wsa.push(wSA(i));wnp.push(wNP(i));wpr2.push(wPR(i));}
+    for(var i=daily.length-1;i>=0;i--){da.push(dA(i));dsc.push(dSC(i));dacs.push(dACS(i));doc.push(dOC(i));dbp.push(dBP(i));dra.push(dRA(i));drc.push(dRC(i));dts.push(dTS(i));dd.push(dD(i));dco.push(dCo(i));dst.push(dSt(i));dac.push(dAc(i));dpr.push(dPr(i));dpe.push(dPe(i));dcg.push(dCG(i));du.push(dU(i));dn.push(dN(i));drs.push(dRS(i));dsa.push(dSA(i));dnp.push(dNP(i));dpr2.push(dPR(i));}
     var h = '';
-    h += dr('Продажи, сумм', t.orders_amount, p.orders_amount, w.orders_amount, lastDay.order_sum);
-    h += dr('Продажи, шт', t.sales_count, p.sales_count, w.sales_count, lastDay.sales_count);
-    h += dr('Средний чек, продажи', t.avg_check_sales, null, w.avg_check_sales, lastDay.avg_check_sales);
-    h += dr('Отказы, шт', t.refusal_count, null, w.order_cancel, lastDay.order_cancel);
-    h += dr('% выкупа', t.buyout_pct+'%', null, w.buyout_pct+'%', lastDay.buyout_pct+'%');
-    h += dr('Возвраты, сумм', t.return_amount, null, w.return_amount, lastDay.return_amount);
-    h += dr('Возвраты, шт', t.return_count, p.returns_count, w.return_count, lastDay.return_count);
-    h += dr('К перечислению продавцу', t.to_supplier, null, w.to_supplier, lastDay.to_supplier);
-    h += dr('Логистика', t.delivery, null, w.delivery, lastDay.delivery);
-    h += dr('Комиссия', t.commission, null, w.commission, lastDay.commission);
-    h += dr('Хранение', t.storage, null, w.storage, lastDay.storage);
-    h += dr('Платная приемка', t.acceptance, null, w.acceptance, lastDay.acceptance);
-    h += dr('Продвижение', t.promotion, null, w.promotion, lastDay.promotion);
-    h += dr('Штрафы', t.penalties, null, w.penalties, lastDay.penalties);
-    h += dr('Себестоимость', t.cost_of_goods, null, w.cost_of_goods, lastDay.cost_of_goods);
-    h += dr('Валовая маржа', gross, null, wg, dg);
-    h += dr('Налоги', t.usn+t.nds, null, (w.usn||0)+(w.nds||0), lastDay.usn+lastDay.nds);
-    h += dr('УСН', t.usn, null, w.usn, lastDay.usn);
-    h += dr('НДС (невозвратный)', t.nds, null, w.nds, lastDay.nds);
-    h += dr('К перечислению на РС', t.to_rs, null, w.to_rs, lastDay.to_rs);
-    h += dr('Рентабельность', t.profitability+'%', null, (w.profitability||0)+'%', lastDay.profitability+'%');
-    h += dr('Чистая прибыль', t.net_profit, null, w.net_profit, lastDay.net_profit);
+    h += dr('Продажи, сумм', t.orders_amount, p.orders_amount, wa, da);
+    h += dr('Продажи, шт', t.sales_count, p.sales_count, wsc, dsc);
+    h += dr('Средний чек, продажи', t.avg_check_sales, null, wacs, dacs);
+    h += dr('Отказы, шт', t.refusal_count, null, woc, doc);
+    h += dr('% выкупа', P(t.buyout_pct), null, wbp.map(function(v){return v!=null?P(v):null;}), dbp.map(function(v){return v!=null?P(v):null;}));
+    h += dr('Возвраты, сумм', t.return_amount, null, wra, dra);
+    h += dr('Возвраты, шт', t.return_count, p.returns_count, wrc, drc);
+    h += dr('К перечислению продавцу', t.to_supplier, null, wts, dts);
+    h += dr('Логистика', t.delivery, null, wd, dd);
+    h += dr('Комиссия', t.commission, null, wco, dco);
+    h += dr('Хранение', t.storage, null, wst, dst);
+    h += dr('Платная приемка', t.acceptance, null, wac, dac);
+    h += dr('Продвижение', t.promotion, null, wpr, dpr);
+    h += dr('Штрафы', t.penalties, null, wpe, dpe);
+    h += dr('Себестоимость', t.cost_of_goods, null, wcg, dcg);
+    var wgm=[],dgm=[];
+    for(var i=0;i<weekly.length;i++){var ww=weekly[i];wgm.push(ww?(ww.sales_amount-ww.wb_expenses_total-ww.cost_of_goods):undefined);}
+    for(var i=0;i<daily.length;i++){var dd2=daily[i];dgm.push(dd2?(dd2.sales_amount-dd2.wb_expenses_total-dd2.cost_of_goods):undefined);}
+    h += dr('Валовая маржа', t.sales_amount-t.wb_expenses_total-t.cost_of_goods, null, wgm, dgm);
+    h += dr('Налоги', t.usn+t.nds, null, wu.map(function(v,i){return v!=null?v+(wn[i]||0):undefined;}), du.map(function(v,i){return v!=null?v+(dn[i]||0):undefined;}));
+    h += dr('УСН', t.usn, null, wu, du);
+    h += dr('НДС (невозвратный)', t.nds, null, wn, dn);
+    h += dr('К перечислению на РС', t.to_rs, null, wrs, drs);
+    h += dr('Рентабельность', P(t.profitability), null, wpr2.map(function(v){return v!=null?P(v):null;}), dpr2.map(function(v){return v!=null?P(v):null;}));
+    h += dr('Чистая прибыль', t.net_profit, null, wnp, dnp);
     document.getElementById('rnpSalesBody').innerHTML = h;
   }
 
   function renderRelative() {
     var m = rnpData.relative;
-    var rows = [['Наценка',m.markup],['Логистика на единицу',m.logistics_per_unit],['Себестоимость на единицу',m.cost_per_unit],['Продвижение на единицу',m.promotion_per_unit],['Хранение на единицу',m.storage_per_unit],['Чистая прибыль на единицу',m.net_profit_per_unit],['Расходы площадки от продаж',m.platform_pct+'%'],['Комиссия с продаж',m.commission_pct+'%'],['Логистика от продаж',m.logistics_pct+'%'],['Продвижение от продаж',m.promotion_pct+'%'],['Хранение от продаж',m.storage_pct+'%'],['Платная приемка от продаж',m.acceptance_pct+'%'],['Себестоимость от продаж',m.cost_pct+'%'],['Налоги от продаж',m.taxes_pct+'%']];
+    var r1=function(v){return typeof v==='number'?(Math.round(v*10)/10)+'%':v;};
+    var rows = [['Наценка',m.markup],['Логистика на единицу',m.logistics_per_unit],['Себестоимость на единицу',m.cost_per_unit],['Продвижение на единицу',m.promotion_per_unit],['Хранение на единицу',m.storage_per_unit],['Чистая прибыль на единицу',m.net_profit_per_unit],['Расходы площадки от продаж',r1(m.platform_pct)],['Комиссия с продаж',r1(m.commission_pct)],['Логистика от продаж',r1(m.logistics_pct)],['Продвижение от продаж',r1(m.promotion_pct)],['Хранение от продаж',r1(m.storage_pct)],['Платная приемка от продаж',r1(m.acceptance_pct)],['Себестоимость от продаж',r1(m.cost_pct)],['Налоги от продаж',r1(m.taxes_pct)]];
     var h = '';
     for (var i = 0; i < rows.length; i++) h += '<tr><td>'+rows[i][0]+'</td><td style="font-family:\'IBM Plex Mono\',monospace;">'+(typeof rows[i][1]==='number'?F(rows[i][1]):rows[i][1])+'</td></tr>';
     document.getElementById('rnpRelativeBody').innerHTML = h;
@@ -320,7 +435,7 @@
     var net = t.net_profit, tx = t.usn + t.nds;
     var rows = [['Прогноз выкупа',t.sales_amount],['WB Расходы',-t.wb_expenses_total],['Себестоимость',-t.cost_of_goods],['Валовая маржа',gross],['EBITDA',gross],['Налоги',-tx],['Чистая прибыль',net]];
     var h = '';
-    for (var i = 0; i < rows.length; i++) h += '<tr><td>'+rows[i][0]+'</td><td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;">'+F(rows[i][1])+'</td><td style="text-align:right;">'+((rows[i][1]/sa)*100).toFixed(1)+'%</td></tr>';
+    for (var i = 0; i < rows.length; i++) h += '<tr><td>'+rows[i][0]+'</td><td style="font-family:\'IBM Plex Mono\',monospace;text-align:center;">'+F(rows[i][1])+'</td><td style="text-align:center;">'+((rows[i][1]/sa)*100).toFixed(1)+'%</td></tr>';
     document.getElementById('rnpPnlBody').innerHTML = h;
   }
 

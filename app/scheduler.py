@@ -306,11 +306,16 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
                                 upsert_ad_campaign_detail(db, tid, advert)
                     db.commit()
 
-                    clear_ad_stats(db, tid)
+                    all_stats = []
                     for i in range(0, len(active_ids), 50):
                         batch = active_ids[i:i+50]
                         stats_data = await fetch_ad_stats(token, batch, date_from, date_to) or []
-                        for camp_stats in stats_data:
+                        all_stats.extend(stats_data)
+                        if i + 50 < len(active_ids):
+                            await asyncio.sleep(65)
+                    if all_stats:
+                        clear_ad_stats(db, tid)
+                        for camp_stats in all_stats:
                             if not camp_stats:
                                 continue
                             aid = camp_stats.get("advertId", 0)
@@ -328,7 +333,7 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
                                 "sum_price": camp_stats.get("sum_price", 0),
                             }, camp_stats)
                         db.commit()
-                    logger.info(f"[{name}] Статистика рекламы: {len(active_ids)} кампаний")
+                    logger.info(f"[{name}] Статистика рекламы: {len(all_stats)} кампаний")
 
                 # Затраты
                 expenses = await fetch_ad_expenses(token, date_from, date_to)

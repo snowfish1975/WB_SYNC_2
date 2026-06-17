@@ -190,19 +190,32 @@ async def fetch_ad_campaign_details(token: str, advert_ids: list[int]) -> list[d
 
 
 async def fetch_ad_stats(token: str, advert_ids: list[int], date_from: str, date_to: str) -> list[dict]:
-    """GET /adv/v3/fullstats — stats for campaigns (max 50 IDs, max 31 days)"""
+    """GET /adv/v3/fullstats — stats for campaigns (max 50 IDs, max 31 days).
+    Rate limit: 1 request per minute. Retries on 429."""
     headers = {"Authorization": token}
     ids_str = ",".join(str(i) for i in advert_ids[:50])
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(
-            f"{ADVERT_API_BASE}/adv/v3/fullstats",
-            headers=headers,
-            params={"ids": ids_str, "beginDate": date_from, "endDate": date_to},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        logger.info(f"Ad stats: {len(data)} campaigns")
-        return data
+    max_attempts = 5
+    for attempt in range(1, max_attempts + 1):
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.get(
+                f"{ADVERT_API_BASE}/adv/v3/fullstats",
+                headers=headers,
+                params={"ids": ids_str, "beginDate": date_from, "endDate": date_to},
+            )
+            if resp.status_code == 429:
+                retry_after = int(resp.headers.get("x-ratelimit-retry", "65"))
+                wait = max(retry_after, 65) + 5
+                logger.warning(f"Ad stats: rate limit 429, waiting {wait}s (attempt {attempt}/{max_attempts})")
+                await asyncio.sleep(wait)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, list):
+                data = data.get("adverts", []) if isinstance(data, dict) else []
+            logger.info(f"Ad stats: {len(data)} campaigns")
+            return data
+    logger.error(f"Ad stats: failed after {max_attempts} attempts due to rate limits")
+    return []
 
 
 async def fetch_ad_expenses(token: str, date_from: str, date_to: str) -> list[dict]:

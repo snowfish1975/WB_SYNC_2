@@ -72,11 +72,22 @@ def _fetch_ad_batch(db: Session, cabinet_id: str, start: date, end: date) -> dic
     for r in rows:
         d = r.date.date() if isinstance(r.date, datetime) else r.date
         by_day[d] += r.spend or 0
+
+    if not by_day:
+        from app.models import AdExpense
+        exp_rows = db.query(AdExpense).filter(
+            AdExpense.cabinet_id == cabinet_id,
+            AdExpense.upd_time >= dt_start, AdExpense.upd_time < dt_end,
+        ).all()
+        for r in exp_rows:
+            d = r.upd_time.date() if isinstance(r.upd_time, datetime) else r.upd_time
+            by_day[d] += r.upd_sum or 0
+
     return dict(by_day)
 
 
 def _calc_day_fast(d: date, orders: list, efo_rows: list, ad_spend: float, settings: dict, cost_map: dict) -> dict:
-    order_sum_before_spp = sum(o.total_price or 0 for o in orders)
+    order_sum_before_spp = sum(o.price_with_disc or 0 for o in orders)
     order_sum_with_spp = sum(o.finished_price or 0 for o in orders)
     order_count = len([o for o in orders if not o.is_cancel])
     order_cancel_count = len([o for o in orders if o.is_cancel])
@@ -117,7 +128,7 @@ def _calc_day_fast(d: date, orders: list, efo_rows: list, ad_spend: float, setti
     nds = sales_amount * (settings["nds_rate_2025"] if year == 2025 else settings["nds_rate"])
     buyout = sales_count / (sales_count + return_count) * 100 if (sales_count + return_count) > 0 else 0
     to_supplier = pay_sales
-    to_rs = sales_amount + return_amount + delivery + comm + storage + accept + promote + penalty
+    to_rs = pay_sales - delivery - comm - storage - accept - promote - penalty
 
     return {
         "date": d.isoformat(),
@@ -178,6 +189,8 @@ def _aggregate(daily: list) -> dict:
     t["promotion_pct"] = round(t["promotion"] / sa * 100, 1)
     t["net_profit"] = round(t["sales_amount"] - t["wb_expenses_total"] - t["cost_of_goods"] - t["usn"] - t["nds"])
     t["profitability"] = round(t["net_profit"] / t["sales_amount"] * 100, 1) if t["sales_amount"] > 0 else 0
+    t["gross_margin"] = round(t["sales_amount"] - t["wb_expenses_total"] - t["cost_of_goods"])
+    t["taxes"] = round(t["usn"] + t["nds"])
     return t
 
 
@@ -250,42 +263,39 @@ def calc_rnp_month(db: Session, cabinet_id: str, month: str, comparison_mode: st
 
     pp = totals_prev or {}
 
+    gm_curr = totals_current["gross_margin"]
+    gm_prev = (pp.get("gross_margin") if pp else None)
+    tx_curr = totals_current["taxes"]
+    tx_prev = (pp.get("taxes") if pp else None)
+
     summary = {
+        # Block 1: Заказы и продажи
         "orders_amount": delta(totals_current["orders_amount"], pp.get("orders_amount")),
-        "platform_pct": delta_pct(totals_current["platform_pct"], pp.get("platform_pct")),
-        "sales_amount": delta(totals_current["sales_amount"], pp.get("sales_amount")),
-        "return_amount": delta(totals_current["return_amount"], pp.get("return_amount")),
-        "wb_expenses": delta(totals_current["wb_expenses_total"], pp.get("wb_expenses_total")),
-        "wb_expenses_pct": delta_pct(totals_current["platform_pct"], pp.get("platform_pct")),
-        "avg_check": delta(totals_current["avg_check_orders"], pp.get("avg_check_orders")),
-        "cost_pct": delta_pct(totals_current["cost_pct"], pp.get("cost_pct")),
-        "sales_count": delta(totals_current["sales_count"], pp.get("sales_count")),
-        "return_count": delta(totals_current["return_count"], pp.get("return_count")),
-        "cost_of_goods": delta(totals_current["cost_of_goods"], pp.get("cost_of_goods")),
-        "cost_of_goods_pct": delta_pct(totals_current["cost_pct"], pp.get("cost_pct")),
-        "net_profit_forecast": delta(totals_current["net_profit"], pp.get("net_profit")),
-        "commission_pct": delta_pct(totals_current["commission_pct"], pp.get("commission_pct")),
-        "net_profit": delta(totals_current["net_profit"], pp.get("net_profit")),
-        "usn": delta(totals_current["usn"], pp.get("usn")),
-        "commission": delta(totals_current["commission"], pp.get("commission")),
-        "commission_pct_row": delta_pct(totals_current["commission_pct"], pp.get("commission_pct")),
-        "profitability": {"value": totals_current["profitability"], "delta": round(totals_current["profitability"] - (pp.get("profitability") or 0), 1), "delta_pct": 0},
-        "logistics_pct": delta_pct(totals_current["logistics_pct"], pp.get("logistics_pct")),
-        "profitability_actual": {"value": totals_current["profitability"], "delta": round(totals_current["profitability"] - (pp.get("profitability") or 0), 1), "delta_pct": 0},
-        "acceptance": delta(totals_current["acceptance"], pp.get("acceptance")),
-        "delivery": delta(totals_current["delivery"], pp.get("delivery")),
-        "delivery_pct": delta_pct(totals_current["logistics_pct"], pp.get("logistics_pct")),
-        "ad_spend": delta(totals_current["ad_spend"], pp.get("ad_spend")),
-        "storage_pct": delta_pct(totals_current["storage_pct"], pp.get("storage_pct")),
-        "to_supplier": delta(totals_current["to_supplier"], pp.get("to_supplier")),
-        "penalties": delta(totals_current["penalties"], pp.get("penalties")),
-        "storage": delta(totals_current["storage"], pp.get("storage")),
-        "storage_pct_row": delta_pct(totals_current["storage_pct"], pp.get("storage_pct")),
         "orders_count": delta(totals_current["orders_count"], pp.get("orders_count")),
-        "promotion_pct": delta_pct(totals_current["promotion_pct"], pp.get("promotion_pct")),
+        "avg_check": delta(totals_current["avg_check_orders"], pp.get("avg_check_orders")),
+        "spp_pct": delta_pct(totals_current["spp_pct"], pp.get("spp_pct")),
+        "sales_amount": delta(totals_current["sales_amount"], pp.get("sales_amount")),
+        "sales_count": delta(totals_current["sales_count"], pp.get("sales_count")),
+        "buyout_pct": delta_pct(totals_current["buyout_pct"], pp.get("buyout_pct")),
+        "return_amount": delta(totals_current["return_amount"], pp.get("return_amount")),
+        "return_count": delta(totals_current["return_count"], pp.get("return_count")),
+        # Block 2: Расходы
+        "cost_of_goods": delta(totals_current["cost_of_goods"], pp.get("cost_of_goods")),
+        "commission": delta(totals_current["commission"], pp.get("commission")),
+        "delivery": delta(totals_current["delivery"], pp.get("delivery")),
+        "storage": delta(totals_current["storage"], pp.get("storage")),
+        "acceptance": delta(totals_current["acceptance"], pp.get("acceptance")),
+        "ad_spend": delta(totals_current["ad_spend"], pp.get("ad_spend")),
+        "promotion": delta(totals_current["promotion"], pp.get("promotion")),
+        "penalties": delta(totals_current["penalties"], pp.get("penalties")),
+        "wb_expenses": delta(totals_current["wb_expenses_total"], pp.get("wb_expenses_total")),
+        # Block 3: Результат
+        "gross_margin": delta(gm_curr, gm_prev),
+        "taxes": delta(tx_curr, tx_prev),
+        "net_profit": delta(totals_current["net_profit"], pp.get("net_profit")),
+        "profitability": {"value": totals_current["profitability"], "delta": round(totals_current["profitability"] - (pp.get("profitability") or 0), 1), "delta_pct": 0},
+        "to_supplier": delta(totals_current["to_supplier"], pp.get("to_supplier")),
         "to_rs": delta(totals_current["to_rs"], pp.get("to_rs")),
-        "ad_spend_promo": delta(totals_current["ad_spend"], pp.get("ad_spend")),
-        "promotion_pct_row": delta_pct(totals_current["promotion_pct"], pp.get("promotion_pct")),
     }
 
     # Товары: агрегация по артикулам
@@ -324,7 +334,7 @@ def calc_rnp_month(db: Session, cabinet_id: str, month: str, comparison_mode: st
         art_deltas.append({"article": art, "current": round(c), "delta": round(c - p)})
     art_deltas.sort(key=lambda x: x["delta"], reverse=True)
     top_products = [a for a in art_deltas if a["delta"] > 0][:10]
-    bottom_products = [a for a in art_deltas if a["delta"] < 0][-5:]
+    bottom_products = [a for a in art_deltas if a["delta"] < 0][-10:]
 
     # План
     plan = None
