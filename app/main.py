@@ -1631,6 +1631,121 @@ def dashboard_ad_search_clusters(
 
 
 # =====================
+# Логистика — Анализ потоков склады → регионы
+# =====================
+
+
+@app.get("/api/dashboard/logistics")
+def dashboard_logistics(
+    request: Request,
+    cabinet_id: str = Query(""),
+    days_back: int = Query(30, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Анализ логистических потоков: склады → регионы доставки."""
+    allowed = _get_user_cabinets(request, db)
+    threshold = datetime.now() - timedelta(days=days_back)
+
+    q = db.query(Order).filter(
+        Order.date >= threshold,
+        Order.is_cancel == False,
+    )
+    if allowed is not None:
+        q = q.filter(Order.cabinet_id.in_(allowed))
+    if cabinet_id:
+        q = q.filter(Order.cabinet_id == cabinet_id)
+
+    from sqlalchemy import func as sa_func
+
+    pairs_q = db.query(
+        Order.warehouse_name,
+        Order.region_name,
+        sa_func.count().label("cnt"),
+        sa_func.sum(Order.price_with_disc).label("total_sum"),
+    ).filter(
+        Order.date >= threshold,
+        Order.is_cancel == False,
+    )
+    if allowed is not None:
+        pairs_q = pairs_q.filter(Order.cabinet_id.in_(allowed))
+    if cabinet_id:
+        pairs_q = pairs_q.filter(Order.cabinet_id == cabinet_id)
+
+    pairs_data = pairs_q.group_by(Order.warehouse_name, Order.region_name).all()
+
+    wh_totals = {}
+    reg_totals = {}
+    total_orders = 0
+    total_sum = 0
+    for p in pairs_data:
+        wh, reg, cnt, sm = p[0], p[1], p[2], float(p[3] or 0)
+        total_orders += cnt
+        total_sum += sm
+        if wh not in wh_totals:
+            wh_totals[wh] = {"orders": 0, "sum": 0, "regions": set()}
+        wh_totals[wh]["orders"] += cnt
+        wh_totals[wh]["sum"] += sm
+        wh_totals[wh]["regions"].add(reg)
+        if reg not in reg_totals:
+            reg_totals[reg] = {"orders": 0, "sum": 0, "warehouses": set()}
+        reg_totals[reg]["orders"] += cnt
+        reg_totals[reg]["sum"] += sm
+        reg_totals[reg]["warehouses"].add(wh)
+
+    warehouses = [
+        {"name": k, "orders": v["orders"], "sum": v["sum"], "regions_count": len(v["regions"])}
+        for k, v in sorted(wh_totals.items(), key=lambda x: -x[1]["orders"])
+    ]
+    regions = [
+        {"name": k, "orders": v["orders"], "sum": v["sum"], "warehouses_count": len(v["warehouses"])}
+        for k, v in sorted(reg_totals.items(), key=lambda x: -x[1]["orders"])
+    ]
+
+    routes = []
+    for p in pairs_data:
+        wh, reg, cnt, sm = p[0], p[1], p[2], float(p[3] or 0)
+        wh_total = wh_totals[wh]["orders"]
+        reg_total = reg_totals[reg]["orders"]
+        routes.append({
+            "warehouse": wh,
+            "region": reg,
+            "orders": cnt,
+            "sum": sm,
+            "pct_of_warehouse": round(cnt / wh_total * 100, 1) if wh_total else 0,
+            "pct_of_region": round(cnt / reg_total * 100, 1) if reg_total else 0,
+        })
+    routes.sort(key=lambda x: -x["orders"])
+
+    recs = []
+    single_wh_regions = [(reg, data) for reg, data in reg_totals.items() if len(data["warehouses"]) == 1 and data["orders"] > 20]
+    if single_wh_regions:
+        for reg, data in sorted(single_wh_regions, key=lambda x: -x[1]["orders"])[:5]:
+            wh = list(data["warehouses"])[0]
+            recs.append({"type": "warning", "text": f"Регион «{reg}» обслуживается только складом «{wh}» ({data['orders']} заказов). Рекомендуется добавить поставки на ближайший склад."})
+
+    top_wh = warehouses[0] if warehouses else None
+    if top_wh and top_wh["orders"] > total_orders * 0.3:
+        recs.append({"type": "info", "text": f"Склад «{top_wh['name']}» обрабатывает {round(top_wh['orders']/total_orders*100,1)}% всех заказов. Высокая концентрация — стоит рассмотреть decentralization."})
+
+    big_routes = [r for r in routes if r["orders"] > 50 and r["pct_of_warehouse"] < 5]
+    if big_routes:
+        recs.append({"type": "danger", "text": f"Маршруты с малой долей от склада: {len(big_routes)} маршрутов с >50 заказами, но <5% от склада. Возможно, стоит перераспределить запасы."})
+
+    if not recs:
+        recs.append({"type": "success", "text": "Распределение запасов выглядит оптимальным. Крупные регионы обслуживаются ближайшими складами."})
+
+    return {
+        "warehouses": warehouses,
+        "regions": regions,
+        "pairs": [{"warehouse": p[0], "region": p[1], "orders": p[2], "sum": float(p[3] or 0)} for p in pairs_data],
+        "routes": routes[:50],
+        "total_orders": total_orders,
+        "total_sum": total_sum,
+        "recommendations": recs,
+    }
+
+
+# =====================
 # РНП — Настройки, себестоимость, расходы, планы
 # =====================
 

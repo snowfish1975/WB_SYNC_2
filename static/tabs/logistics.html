@@ -1,0 +1,276 @@
+<!-- TAB: ЛОГИСТИКА — Анализ складских запасов по регионам -->
+<div id="logisticsTab">
+  <div class="card section-mb">
+    <div class="section-title">Логистика — Анализ потоков склады → регионы</div>
+    <div class="filters">
+      <label style="font-size:12px;color:var(--text2);">Период:</label>
+      <select id="logPeriod" class="filter-select">
+        <option value="7">7 дней</option>
+        <option value="14">14 дней</option>
+        <option value="30" selected>30 дней</option>
+        <option value="40">40 дней</option>
+      </select>
+      <label style="font-size:12px;color:var(--text2);margin-left:12px;">Топ складов:</label>
+      <select id="logTopWh" class="filter-select">
+        <option value="10">10</option>
+        <option value="15" selected>15</option>
+        <option value="20">20</option>
+        <option value="0">Все</option>
+      </select>
+      <label style="font-size:12px;color:var(--text2);margin-left:12px;">Топ регионов:</label>
+      <select id="logTopReg" class="filter-select">
+        <option value="10">10</option>
+        <option value="15" selected>15</option>
+        <option value="20">20</option>
+        <option value="0">Все</option>
+      </select>
+      <button class="filter-btn" onclick="logLoad()">Обновить</button>
+    </div>
+  </div>
+
+  <!-- Карточки метрик -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">
+    <div class="card" style="padding:16px;text-align:center;">
+      <div style="font-size:11px;color:var(--text3);">Складов</div>
+      <div id="logWarehouses" style="font-size:24px;font-weight:700;margin-top:4px;">—</div>
+    </div>
+    <div class="card" style="padding:16px;text-align:center;">
+      <div style="font-size:11px;color:var(--text3);">Регионов доставки</div>
+      <div id="logRegions" style="font-size:24px;font-weight:700;margin-top:4px;">—</div>
+    </div>
+    <div class="card" style="padding:16px;text-align:center;">
+      <div style="font-size:11px;color:var(--text3);">Пар склад→регион</div>
+      <div id="logPairs" style="font-size:24px;font-weight:700;margin-top:4px;">—</div>
+    </div>
+    <div class="card" style="padding:16px;text-align:center;">
+      <div style="font-size:11px;color:var(--text3);">Заказов</div>
+      <div id="logTotalOrders" style="font-size:24px;font-weight:700;margin-top:4px;">—</div>
+    </div>
+    <div class="card" style="padding:16px;text-align:center;">
+      <div style="font-size:11px;color:var(--text3);">Среднее расст. (усл.)</div>
+      <div id="logAvgDist" style="font-size:24px;font-weight:700;margin-top:4px;">—</div>
+    </div>
+  </div>
+
+  <!-- Sankey-диаграмма -->
+  <div class="card section-mb">
+    <div class="section-title">Потоки: склады → регионы доставки</div>
+    <div id="logSankey" style="overflow-x:auto;padding:10px 0;"></div>
+  </div>
+
+  <!-- Тепловая карта -->
+  <div class="card section-mb">
+    <div class="section-title">Тепловая карта: склад × регион (заказы)</div>
+    <div id="logHeatmap" style="overflow-x:auto;"></div>
+  </div>
+
+  <!-- Топ маршрутов -->
+  <div class="card section-mb">
+    <div class="section-title">Топ-20 маршрутов (склад → регион)</div>
+    <div class="table-wrap">
+      <table style="font-size:12px;">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Склад</th>
+            <th>Регион</th>
+            <th style="text-align:right">Заказов</th>
+            <th style="text-align:right">Сумма</th>
+            <th style="text-align:right">% от склада</th>
+            <th style="text-align:right">% от региона</th>
+          </tr>
+        </thead>
+        <tbody id="logRoutes"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Рекомендации -->
+  <div class="card section-mb">
+    <div class="section-title">Рекомендации по оптимизации</div>
+    <div id="logRecommendations" style="padding:12px;font-size:13px;"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+  function F(v) { return v === null || v === undefined ? '—' : new Intl.NumberFormat('ru-RU').format(Math.round(v)); }
+  function P(v) { return v === null || v === undefined ? '—' : (Math.round(v * 10) / 10) + '%'; }
+
+  var logData = null;
+
+  window.logLoad = async function() {
+    var days = document.getElementById('logPeriod').value;
+    var cab = window.WB ? WB.cabinet : '';
+    if (!cab) return;
+    try {
+      var res = await fetch('/api/dashboard/logistics?cabinet_id=' + encodeURIComponent(cab) + '&days_back=' + days);
+      if (!res.ok) { console.error('HTTP ' + res.status); return; }
+      logData = await res.json();
+      logRender();
+    } catch(e) { console.error(e); }
+  };
+
+  function logRender() {
+    if (!logData) return;
+    var topWh = parseInt(document.getElementById('logTopWh').value) || 999;
+    var topReg = parseInt(document.getElementById('logTopReg').value) || 999;
+
+    var warehouses = logData.warehouses || [];
+    var regions = logData.regions || [];
+    var pairs = logData.pairs || [];
+    var routes = logData.routes || [];
+
+    document.getElementById('logWarehouses').textContent = warehouses.length;
+    document.getElementById('logRegions').textContent = regions.length;
+    document.getElementById('logPairs').textContent = pairs.length;
+    document.getElementById('logTotalOrders').textContent = F(logData.total_orders);
+    document.getElementById('logAvgDist').textContent = logData.avg_distance || '—';
+
+    renderSankey(warehouses.slice(0, topWh), regions.slice(0, topReg), pairs, topWh, topReg);
+    renderHeatmap(warehouses.slice(0, topWh), regions.slice(0, topReg), pairs);
+    renderRoutes(routes);
+    renderRecommendations(logData.recommendations || []);
+  }
+
+  function renderSankey(whs, regs, pairs, topWh, topReg) {
+    var container = document.getElementById('logSankey');
+    if (!whs.length || !regs.length) { container.innerHTML = '<div style="padding:20px;color:var(--text3);">Нет данных</div>'; return; }
+
+    var whSet = new Set(whs.map(function(w){return w.name;}));
+    var regSet = new Set(regs.map(function(r){return r.name;}));
+    var filtered = pairs.filter(function(p){return whSet.has(p.warehouse) && regSet.has(p.region);});
+
+    var maxVal = Math.max.apply(null, filtered.map(function(p){return p.orders;})) || 1;
+    var whHeight = 28;
+    var regHeight = 22;
+    var whTotalH = whs.length * whHeight;
+    var regTotalH = regs.length * regHeight;
+    var totalH = Math.max(whTotalH, regTotalH, 400);
+    var svgW = 900;
+    var leftX = 160;
+    var rightX = svgW - 160;
+    var whStartY = (totalH - whTotalH) / 2;
+    var regStartY = (totalH - regTotalH) / 2;
+
+    var svg = '<svg width="' + svgW + '" height="' + (totalH + 20) + '" style="font-size:11px;">';
+
+    // Draw warehouse labels and bars
+    for (var i = 0; i < whs.length; i++) {
+      var y = whStartY + i * whHeight;
+      svg += '<text x="5" y="' + (y + whHeight/2 + 4) + '" style="font-size:11px;fill:var(--text2);">' + esc(whs[i].name.substring(0, 22)) + '</text>';
+      svg += '<rect x="' + (leftX - 8) + '" y="' + y + '" width="8" height="' + (whHeight - 2) + '" rx="2" fill="#4a90d9"/>';
+    }
+
+    // Draw region labels and bars
+    for (var i = 0; i < regs.length; i++) {
+      var y = regStartY + i * regHeight;
+      svg += '<text x="' + (rightX + 14) + '" y="' + (y + regHeight/2 + 4) + '" style="font-size:10px;fill:var(--text2);">' + esc(regs[i].name.substring(0, 20)) + '</text>';
+      svg += '<rect x="' + rightX + '" y="' + y + '" width="8" height="' + (regHeight - 2) + '" rx="2" fill="#e8a838"/>';
+    }
+
+    // Draw flows
+    var whOffsets = {};
+    for (var i = 0; i < whs.length; i++) whOffsets[whs[i].name] = 0;
+    var regOffsets = {};
+    for (var i = 0; i < regs.length; i++) regOffsets[regs[i].name] = 0;
+
+    var sorted = filtered.slice().sort(function(a,b){return b.orders - a.orders;});
+    for (var i = 0; i < sorted.length; i++) {
+      var p = sorted[i];
+      var whIdx = whs.findIndex(function(w){return w.name === p.warehouse;});
+      var regIdx = regs.findIndex(function(r){return r.name === p.region;});
+      if (whIdx < 0 || regIdx < 0) continue;
+
+      var whY = whStartY + whIdx * whHeight + whOffsets[p.warehouse];
+      var regY = regStartY + regIdx * regHeight + regOffsets[p.region];
+      var thickness = Math.max(1, (p.orders / maxVal) * (whHeight - 4));
+      var opacity = Math.max(0.15, Math.min(0.6, p.orders / maxVal));
+
+      var color = p.orders > 200 ? '#4a90d9' : p.orders > 100 ? '#6ab04c' : p.orders > 50 ? '#e8a838' : '#ccc';
+
+      svg += '<path d="M' + leftX + ',' + (whY + thickness/2) + ' C' + (leftX + 200) + ',' + (whY + thickness/2) + ' ' + (rightX - 200) + ',' + (regY + thickness/2) + ' ' + rightX + ',' + (regY + thickness/2) + '" fill="none" stroke="' + color + '" stroke-width="' + thickness + '" opacity="' + opacity + '"><title>' + esc(p.warehouse) + ' → ' + esc(p.region) + ': ' + p.orders + ' заказов</title></path>';
+
+      whOffsets[p.warehouse] += thickness + 1;
+      regOffsets[p.region] += thickness + 1;
+    }
+
+    svg += '</svg>';
+    container.innerHTML = svg;
+  }
+
+  function renderHeatmap(whs, regs, pairs) {
+    var container = document.getElementById('logHeatmap');
+    if (!whs.length || !regs.length) { container.innerHTML = ''; return; }
+
+    var data = {};
+    var maxVal = 0;
+    for (var i = 0; i < pairs.length; i++) {
+      var key = pairs[i].warehouse + '|' + pairs[i].region;
+      data[key] = pairs[i].orders;
+      if (pairs[i].orders > maxVal) maxVal = pairs[i].orders;
+    }
+
+    var html = '<table style="font-size:10px;border-collapse:collapse;">';
+    html += '<tr><th style="padding:4px;min-width:140px;position:sticky;left:0;background:var(--bg);z-index:1;"></th>';
+    for (var j = 0; j < regs.length; j++) {
+      html += '<th style="padding:2px 4px;writing-mode:vertical-rl;text-orientation:mixed;max-width:24px;font-weight:400;">' + esc(regs[j].name.substring(0, 12)) + '</th>';
+    }
+    html += '</tr>';
+
+    for (var i = 0; i < whs.length; i++) {
+      html += '<tr><td style="padding:4px;font-weight:500;white-space:nowrap;position:sticky;left:0;background:var(--bg);z-index:1;">' + esc(whs[i].name.substring(0, 20)) + '</td>';
+      for (var j = 0; j < regs.length; j++) {
+        var key = whs[i].name + '|' + regs[j].name;
+        var val = data[key] || 0;
+        var ratio = maxVal > 0 ? val / maxVal : 0;
+        var bg = val === 0 ? 'transparent' :
+          ratio > 0.5 ? 'rgba(74,144,217,' + Math.min(0.9, ratio) + ')' :
+          ratio > 0.2 ? 'rgba(106,176,76,' + Math.min(0.8, ratio) + ')' :
+          'rgba(232,168,56,' + Math.min(0.7, ratio) + ')';
+        var fg = ratio > 0.3 ? '#fff' : 'var(--text2)';
+        html += '<td style="padding:3px 4px;text-align:center;background:' + bg + ';color:' + fg + ';min-width:28px;" title="' + esc(whs[i].name) + ' → ' + esc(regs[j].name) + ': ' + val + '">' + (val || '') + '</td>';
+      }
+      html += '</tr>';
+    }
+    html += '</table>';
+    container.innerHTML = html;
+  }
+
+  function renderRoutes(routes) {
+    var tbody = document.getElementById('logRoutes');
+    var html = '';
+    for (var i = 0; i < routes.length; i++) {
+      var r = routes[i];
+      html += '<tr>';
+      html += '<td>' + (i + 1) + '</td>';
+      html += '<td>' + esc(r.warehouse) + '</td>';
+      html += '<td>' + esc(r.region) + '</td>';
+      html += '<td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;">' + F(r.orders) + '</td>';
+      html += '<td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;">' + F(r.sum) + '₽</td>';
+      html += '<td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;">' + P(r.pct_of_warehouse) + '</td>';
+      html += '<td style="font-family:\'IBM Plex Mono\',monospace;text-align:right;">' + P(r.pct_of_region) + '</td>';
+      html += '</tr>';
+    }
+    tbody.innerHTML = html || '<tr><td colspan="7" style="text-align:center;color:var(--text3);">Нет данных</td></tr>';
+  }
+
+  function renderRecommendations(recs) {
+    var container = document.getElementById('logRecommendations');
+    if (!recs.length) { container.innerHTML = '<div style="color:var(--text3);">Нет рекомендаций</div>'; return; }
+    var html = '<ul style="margin:0;padding-left:20px;">';
+    for (var i = 0; i < recs.length; i++) {
+      var icon = recs[i].type === 'danger' ? '🔴' : recs[i].type === 'warning' ? '🟡' : '🟢';
+      html += '<li style="margin-bottom:6px;">' + icon + ' ' + esc(recs[i].text) + '</li>';
+    }
+    html += '</ul>';
+    container.innerHTML = html;
+  }
+
+  window.addEventListener('wb:tab-activated:logistics', function() { logLoad(); });
+  window.addEventListener('wb:cabinet-changed', function() {
+    try { if (typeof loadedTabs !== 'undefined' && loadedTabs.has('logistics')) logLoad(); } catch(e) {}
+  });
+})();
+</script>

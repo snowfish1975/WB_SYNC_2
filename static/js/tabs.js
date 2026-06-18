@@ -19,6 +19,7 @@ const TAB_SRCS = {
   'unit-economics': '/static/tabs/unit-economics.html',
   'search-clusters': '/static/tabs/search-clusters.html',
   'rnp':               '/static/tabs/rnp.html',
+  'logistics':         '/static/tabs/logistics.html',
   'profile':         '/static/tabs/profile.html',
   'admin':           '/static/tabs/admin.html',
 };
