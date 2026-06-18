@@ -96,6 +96,72 @@ async def fetch_sales_funnel(
     return results
 
 
+async def fetch_sales_funnel_history(
+    token: str,
+    nm_ids: list[int],
+    date_from: str,
+    date_to: str,
+    batch_size: int = 500,
+) -> list[dict[str, Any]]:
+    """
+    Подневная история воронки: POST /api/analytics/v3/sales-funnel/products/history
+    Возвращает дневные данные по каждому товару.
+    Лимит: 3 запроса в минуту, 20 сек между запросами.
+    nm_ids разбиваются на батчи по batch_size.
+    """
+    headers = {"Authorization": token}
+    results = []
+    max_attempts = 5
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        for i in range(0, len(nm_ids), batch_size):
+            batch = nm_ids[i:i + batch_size]
+            payload = {
+                "nmIds": batch,
+                "selectedPeriod": {"start": date_from, "end": date_to},
+            }
+
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    resp = await client.post(
+                        f"{WB_ANALYTICS_BASE}/api/analytics/v3/sales-funnel/products/history",
+                        headers=headers,
+                        json=payload,
+                    )
+                    if resp.status_code == 429:
+                        retry_after = int(resp.headers.get("x-ratelimit-retry", "65"))
+                        wait = max(retry_after, 65) + 5
+                        logger.warning(f"Funnel history: rate limit 429, waiting {wait}s (attempt {attempt}/{max_attempts})")
+                        await asyncio.sleep(wait)
+                        continue
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+                except Exception as e:
+                    logger.warning(f"Funnel history, batch {i//batch_size+1}, attempt {attempt}/{max_attempts}: {type(e).__name__}: {e}")
+                    if hasattr(e, "response") and e.response is not None:
+                        logger.warning(f"HTTP статус: {e.response.status_code}, тело: {e.response.text[:500]}")
+                    if attempt == max_attempts:
+                        logger.error(f"Funnel history: не удалось получить данные после {max_attempts} попыток")
+                        data = []
+                        break
+                    await asyncio.sleep(20)
+
+            if isinstance(data, list):
+                results.extend(data)
+                logger.info(f"Funnel history: batch {i//batch_size+1}, received {len(data)} products")
+            elif isinstance(data, dict):
+                products = data.get("data", {}).get("products", [])
+                results.extend(products)
+                logger.info(f"Funnel history: batch {i//batch_size+1}, received {len(products)} products")
+
+            if i + batch_size < len(nm_ids):
+                await asyncio.sleep(20)
+
+    logger.info(f"Funnel history: всего получено {len(results)} товаров")
+    return results
+
+
 async def fetch_stock_by_offices(token: str, date_from: str, date_to: str) -> list[dict]:
     """POST /api/v2/stocks-report/offices"""
     headers = {"Authorization": token}

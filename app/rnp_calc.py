@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 
 from app.models import (
-    Order, Sale, SalesReport, AdCampaignStats,
+    Order, Sale, SalesReport, AdCampaignStats, ShelfMetric,
     RnpSetting, RnpCost, RnpFixedExpense, RnpVariableExpense, RnpLoanPayment, RnpPlan,
 )
 
@@ -84,6 +84,22 @@ def _fetch_ad_batch(db: Session, cabinet_id: str, start: date, end: date) -> dic
             by_day[d] += r.upd_sum or 0
 
     return dict(by_day)
+
+
+def _fetch_shelf_orders(db: Session, cabinet_id: str, start: date, end: date) -> dict:
+    rows = db.query(ShelfMetric).filter(
+        ShelfMetric.cabinet_id == cabinet_id,
+        ShelfMetric.period_end >= datetime(start.year, start.month, start.day),
+        ShelfMetric.period_start < datetime(end.year, end.month, end.day) + timedelta(days=1),
+    ).all()
+    return {
+        "order_count": sum(r.order_count for r in rows),
+        "order_sum": sum(r.order_sum for r in rows),
+        "buyout_count": sum(r.buyout_count for r in rows),
+        "buyout_sum": sum(r.buyout_sum for r in rows),
+        "cancel_count": sum(r.cancel_count for r in rows),
+        "cancel_sum": sum(r.cancel_sum for r in rows),
+    }
 
 
 def _calc_day_fast(d: date, orders: list, efo_rows: list, ad_spend: float, settings: dict, cost_map: dict) -> dict:
@@ -218,6 +234,24 @@ def calc_rnp_month(db: Session, cabinet_id: str, month: str, comparison_mode: st
         ))
     totals_current = _aggregate(daily_current)
 
+    # Переопределяем order_count и order_sum из ShelfMetrics (воронка)
+    shelf_curr = _fetch_shelf_orders(db, cabinet_id, month_start, actual_end)
+    if shelf_curr["order_count"] > 0:
+        totals_current["orders_count"] = shelf_curr["order_count"]
+        totals_current["orders_amount"] = shelf_curr["order_sum"]
+        totals_current["avg_check_orders"] = (
+            shelf_curr["order_sum"] / shelf_curr["order_count"]
+        )
+        totals_current["drr"] = (
+            totals_current["ad_spend"] / shelf_curr["order_sum"] * 100
+            if shelf_curr["order_sum"] > 0 else 0
+        )
+        totals_current["shelf_order_count"] = shelf_curr["order_count"]
+        totals_current["shelf_order_sum"] = shelf_curr["order_sum"]
+    else:
+        totals_current["shelf_order_count"] = 0
+        totals_current["shelf_order_sum"] = 0
+
     # Недельная агрегация
     weekly = []
     if len(daily_current) >= 7:
@@ -249,6 +283,19 @@ def calc_rnp_month(db: Session, cabinet_id: str, month: str, comparison_mode: st
                 d, orders_prev.get(d, []), efo_prev.get(d, []), ad_prev.get(d, 0), settings, cost_map
             ))
         totals_prev = _aggregate(daily_prev)
+
+        # Переопределяем order_count и order_sum из ShelfMetrics для периода сравнения
+        shelf_prev = _fetch_shelf_orders(db, cabinet_id, prev_start, prev_end)
+        if shelf_prev["order_count"] > 0:
+            totals_prev["orders_count"] = shelf_prev["order_count"]
+            totals_prev["orders_amount"] = shelf_prev["order_sum"]
+            totals_prev["avg_check_orders"] = (
+                shelf_prev["order_sum"] / shelf_prev["order_count"]
+            )
+            totals_prev["drr"] = (
+                totals_prev["ad_spend"] / shelf_prev["order_sum"] * 100
+                if shelf_prev["order_sum"] > 0 else 0
+            )
 
     def delta(curr, prev):
         if prev is None or prev == 0:
@@ -399,6 +446,20 @@ def calc_rnp(db: Session, cabinet_id: str, days_back: int = 40) -> dict:
         daily.append(_calc_day_fast(d, orders_b.get(d, []), efo_b.get(d, []), ad_b.get(d, 0), settings, cost_map))
 
     t = _aggregate(daily)
+
+    # Переопределяем order_count и order_sum из ShelfMetrics (воронка)
+    shelf = _fetch_shelf_orders(db, cabinet_id, date_start, date_end)
+    if shelf["order_count"] > 0:
+        t["orders_count"] = shelf["order_count"]
+        t["orders_amount"] = shelf["order_sum"]
+        t["avg_check_orders"] = shelf["order_sum"] / shelf["order_count"]
+        t["drr"] = t["ad_spend"] / shelf["order_sum"] * 100 if shelf["order_sum"] > 0 else 0
+        t["shelf_order_count"] = shelf["order_count"]
+        t["shelf_order_sum"] = shelf["order_sum"]
+    else:
+        t["shelf_order_count"] = 0
+        t["shelf_order_sum"] = 0
+
     sa = t["sales_amount"] or 1
     relative = {
         "markup": t["sales_amount"] / t["cost_of_goods"] if t["cost_of_goods"] > 0 else 0,
@@ -443,6 +504,8 @@ def calc_rnp(db: Session, cabinet_id: str, days_back: int = 40) -> dict:
             "refusal_count": t["order_cancel"], "avg_check_sales": round(t["avg_check_sales"]),
             "buyout_pct": round(t["buyout_pct"], 1), "spp_sales": 0,
             "to_supplier": t["to_supplier"], "cost_of_goods": t["cost_of_goods"],
+            "shelf_order_count": t.get("shelf_order_count", 0),
+            "shelf_order_sum": t.get("shelf_order_sum", 0),
         },
         "wb_expenses": {
             "delivery": t["delivery"], "commission": t["commission"],

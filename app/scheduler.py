@@ -21,7 +21,7 @@ from app.crud import (
     upsert_sales_report_row, upsert_orders_bulk, upsert_sales_bulk,
     clear_characteristics, clear_stocks, clear_old_orders, clear_old_sales,
     clear_sales_report, get_tokens_from_db, get_token_mapping_from_db, load_token_mapping,
-    clear_shelf_metrics, upsert_shelf_metric,
+    clear_shelf_metrics, upsert_shelf_metric, clean_old_shelf_metrics,
     clear_funnel_metrics, upsert_funnel_metric,
     clear_stock_by_offices, upsert_stock_by_office,
     clear_item_ratings, upsert_item_rating,
@@ -227,39 +227,78 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
         clear_old_orders(db, tid, days=40)
         clear_old_sales(db, tid, days=40)
 
-        # --- Воронка продаж (sales-funnel v3, 30 дней) ---
+        # --- Воронка продаж (sales-funnel v3) ---
+        # FunnelMetric: агрегат за 30 дней (для вкладки Воронка)
+        # ShelfMetric: подневные данные (для РНП сводки), каждый день — 1 запрос
         try:
             now_ms = datetime.now(MOSCOW_TZ)
-            date_from = (now_ms - timedelta(days=30)).strftime("%Y-%m-%d")
+            date_from_30 = (now_ms - timedelta(days=30)).strftime("%Y-%m-%d")
             date_to = now_ms.strftime("%Y-%m-%d")
-            period_start = datetime.strptime(date_from, "%Y-%m-%d")
+            period_start_30 = datetime.strptime(date_from_30, "%Y-%m-%d")
             period_end = datetime.strptime(date_to, "%Y-%m-%d")
 
-            logger.info(f"[{name}] очистка метрик витрины...")
-            clear_shelf_metrics(db, tid)
-            logger.info(f"[{name}] загрузка воронки продаж ({date_from} — {date_to})...")
-            funnel_data = await fetch_sales_funnel(token, date_from=date_from, date_to=date_to)
-            shelf_count = 0
+            logger.info(f"[{name}] загрузка агрегата воронки (FunnelMetric, 30 дней)...")
+            funnel_data = await fetch_sales_funnel(token, date_from=date_from_30, date_to=date_to)
             funnel_count = 0
             for item in funnel_data:
-                upsert_shelf_metric(db, tid, item, period_start, period_end)
-                shelf_count += 1
-                upsert_funnel_metric(db, tid, item, period_start, period_end)
+                upsert_funnel_metric(db, tid, item, period_start_30, period_end)
                 funnel_count += 1
             db.commit()
-            result["shelf_count"] = shelf_count
             result["funnel_count"] = funnel_count
+            logger.info(f"[{name}] FunnelMetric сохранена: {funnel_count} товаров")
             del funnel_data
             gc.collect()
-            logger.info(f"[{name}] Воронка продаж сохранена: {shelf_count} товаров")
+
+            date_from_1 = (now_ms - timedelta(days=1)).strftime("%Y-%m-%d")
+
+            from sqlalchemy import func as sa_func
+            existing_days = db.query(sa_func.count(sa_func.distinct(ShelfMetric.period_end))).filter(
+                ShelfMetric.cabinet_id == tid
+            ).scalar() or 0
+
+            days_to_load = []
+            if existing_days < 40:
+                target_days = 40
+                for i in range(target_days, 0, -1):
+                    d = (now_ms - timedelta(days=i)).strftime("%Y-%m-%d")
+                    exists = db.query(sa_func.count()).filter(
+                        ShelfMetric.cabinet_id == tid,
+                        ShelfMetric.period_end == datetime.strptime(d, "%Y-%m-%d"),
+                    ).scalar() or 0
+                    if exists == 0:
+                        days_to_load.append(d)
+                logger.info(f"[{name}] Backfill: нужно загрузить {len(days_to_load)} дней (есть {existing_days} из 40)")
+            else:
+                days_to_load.append(date_from_1)
+
+            shelf_total = 0
+            for day_str in days_to_load:
+                logger.info(f"[{name}] загрузка воронки за {day_str}...")
+                shelf_data = await fetch_sales_funnel(token, date_from=day_str, date_to=day_str)
+                shelf_day = datetime.strptime(day_str, "%Y-%m-%d")
+                shelf_count = 0
+                for item in shelf_data:
+                    upsert_shelf_metric(db, tid, item, shelf_day, shelf_day)
+                    shelf_count += 1
+                db.commit()
+                shelf_total += shelf_count
+                del shelf_data
+                gc.collect()
+                await asyncio.sleep(20)
+
+            result["shelf_count"] = shelf_total
+            logger.info(f"[{name}] ShelfMetric подневная: {shelf_total} записей за {len(days_to_load)} дней")
+
+            clean_old_shelf_metrics(db, tid, days=40)
+            logger.info(f"[{name}] Очистка ShelfMetric старше 40 дней завершена")
 
             # --- Остатки по складам ---
             logger.info(f"[{name}] загрузка остатков по складам...")
-            offices_data = await fetch_stock_by_offices(token, date_from=date_from, date_to=date_to)
+            offices_data = await fetch_stock_by_offices(token, date_from=date_from_30, date_to=date_to)
             offices_count = 0
             for region in offices_data:
                 for office in region.get("offices", []):
-                    upsert_stock_by_office(db, tid, region, office, period_start, period_end)
+                    upsert_stock_by_office(db, tid, region, office, period_start_30, period_end)
                     offices_count += 1
             db.commit()
             result["offices_count"] = offices_count
@@ -271,10 +310,10 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
             yesterday = (now_ms - timedelta(days=1)).strftime("%Y-%m-%d")
             logger.info(f"[{name}] загрузка оценок товаров...")
             clear_item_ratings(db, tid)
-            ratings_data, seller_rating = await fetch_item_rating(token, date_from=date_from, date_to=yesterday)
+            ratings_data, seller_rating = await fetch_item_rating(token, date_from=date_from_30, date_to=yesterday)
             ratings_count = 0
             for card in ratings_data:
-                upsert_item_rating(db, tid, card, seller_rating, period_start, period_end)
+                upsert_item_rating(db, tid, card, seller_rating, period_start_30, period_end)
                 ratings_count += 1
             db.commit()
             result["ratings_count"] = ratings_count
@@ -309,7 +348,7 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
                     all_stats = []
                     for i in range(0, len(active_ids), 50):
                         batch = active_ids[i:i+50]
-                        stats_data = await fetch_ad_stats(token, batch, date_from, date_to) or []
+                        stats_data = await fetch_ad_stats(token, batch, date_from_30, date_to) or []
                         all_stats.extend(stats_data)
                         if i + 50 < len(active_ids):
                             await asyncio.sleep(65)
@@ -319,7 +358,7 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
                             if not camp_stats:
                                 continue
                             aid = camp_stats.get("advertId", 0)
-                            upsert_ad_stats(db, tid, aid, period_start, {
+                            upsert_ad_stats(db, tid, aid, period_start_30, {
                                 "views": camp_stats.get("views", 0),
                                 "clicks": camp_stats.get("clicks", 0),
                                 "ctr": camp_stats.get("ctr", 0),
@@ -336,7 +375,7 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
                     logger.info(f"[{name}] Статистика рекламы: {len(all_stats)} кампаний")
 
                 # Затраты
-                expenses = await fetch_ad_expenses(token, date_from, date_to)
+                expenses = await fetch_ad_expenses(token, date_from_30, date_to)
                 clear_ad_expenses(db, tid)
                 for exp in expenses:
                     upsert_ad_expense(db, tid, exp)
@@ -360,7 +399,7 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
                                 cluster_items.append({"advert_id": aid, "nm_id": nm_id})
                     
                     if cluster_items:
-                        clusters_data = await fetch_ad_search_clusters(token, cluster_items, date_from, date_to)
+                        clusters_data = await fetch_ad_search_clusters(token, cluster_items, date_from_30, date_to)
                         seen_aids = set()
                         for camp_data in clusters_data:
                             aid = camp_data.get("advert_id", 0)

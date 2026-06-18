@@ -750,9 +750,28 @@ def upsert_shelf_metric(db: Session, cabinet_id: str, item: dict, period_start: 
     db.execute(stmt)
 
 
+def clean_old_shelf_metrics(db: Session, cabinet_id: str, days: int = 40):
+    threshold = datetime.utcnow() - timedelta(days=days)
+    db.query(ShelfMetric).filter(
+        ShelfMetric.cabinet_id == cabinet_id,
+        ShelfMetric.period_end < threshold,
+    ).delete()
+    db.commit()
+
+
 def get_shelf_metrics(db: Session, cabinet_id: str | None = None, days_back: int = 30):
-    threshold = datetime.now() - timedelta(days=days_back)
-    q = db.query(ShelfMetric).filter(ShelfMetric.period_end >= threshold)
+    from sqlalchemy import func as sa_func
+    subq = db.query(
+        ShelfMetric.nm_id,
+        sa_func.max(ShelfMetric.period_end).label("max_period_end"),
+    )
+    if cabinet_id:
+        subq = subq.filter(ShelfMetric.cabinet_id == cabinet_id)
+    subq = subq.group_by(ShelfMetric.nm_id).subquery()
+    q = db.query(ShelfMetric).join(
+        subq,
+        (ShelfMetric.nm_id == subq.c.nm_id) & (ShelfMetric.period_end == subq.c.max_period_end),
+    )
     if cabinet_id:
         q = q.filter(ShelfMetric.cabinet_id == cabinet_id)
     return q.order_by(ShelfMetric.order_sum.desc()).limit(50000).all()
