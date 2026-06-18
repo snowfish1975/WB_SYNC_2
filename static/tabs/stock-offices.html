@@ -52,6 +52,7 @@
 
 <script>
 (function() {
+  function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
   let data = [], filtered = [], page = 1;
   const PER = 50;
   let sortCol = 'stock_sum', sortDir = -1;
