@@ -1646,6 +1646,56 @@ def dashboard_ad_search_clusters(
     return result
 
 
+@app.get("/api/dashboard/stock-offices/products")
+def stock_office_products(
+    request: Request,
+    office_name: str = Query(...),
+    cabinet_id: str = Query(""),
+    db: Session = Depends(get_db),
+):
+    """Товары на конкретном складе."""
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
+
+    q = db.query(Stock).filter(Stock.warehouse_name == office_name)
+    if allowed is not None:
+        q = q.filter(Stock.cabinet_id.in_(allowed))
+    if cabinet_id:
+        q = q.filter(Stock.cabinet_id == cabinet_id)
+
+    rows = q.order_by(Stock.quantity.desc()).limit(5000).all()
+
+    mapping = load_token_mapping()
+    nm_ids = list(set(r.nm_id for r in rows if r.nm_id))
+    chars = {}
+    if nm_ids:
+        char_rows = db.query(ProductCharacteristic).filter(
+            ProductCharacteristic.nm_id.in_(nm_ids)
+        ).all()
+        for c in char_rows:
+            chars[c.nm_id] = c
+
+    result = []
+    for r in rows:
+        ch = chars.get(r.nm_id)
+        vendor_code = ""
+        product_name = ""
+        if ch and ch.characteristics:
+            chars_data = ch.characteristics if isinstance(ch.characteristics, dict) else {}
+            vendor_code = chars_data.get("vendorCode", "")
+            product_name = chars_data.get("title", "")
+        result.append({
+            "nm_id": r.nm_id,
+            "vendor_code": vendor_code,
+            "product_name": product_name,
+            "quantity": r.quantity,
+            "in_way_to_client": r.in_way_to_client,
+            "in_way_from_client": r.in_way_from_client,
+        })
+    return result
+
+
 # =====================
 # Логистика — Анализ потоков склады → регионы
 # =====================

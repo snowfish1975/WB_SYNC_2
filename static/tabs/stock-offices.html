@@ -26,6 +26,28 @@
     </div>
     <div class="pagination" id="soPagination"></div>
   </div>
+
+  <div class="card" id="soDetail" style="display:none;">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;">
+      <span id="soDetailTitle">Товары на складе</span>
+      <button class="filter-btn" onclick="document.getElementById('soDetail').style.display='none'" style="font-size:11px;padding:4px 10px;">✕ Закрыть</button>
+    </div>
+    <div class="table-wrap">
+      <table style="font-size:12px;">
+        <thead>
+          <tr>
+            <th onclick="soDetailSort('nm_id')">АРТ WB ↕</th>
+            <th onclick="soDetailSort('vendor_code')">АРТ ПОСТАВЩИКА ↕</th>
+            <th onclick="soDetailSort('product_name')">ТОВАР ↕</th>
+            <th onclick="soDetailSort('quantity')" style="text-align:right">ОСТАТКИ ↕</th>
+            <th onclick="soDetailSort('in_way_to_client')" style="text-align:right">К КЛИЕНТУ ↕</th>
+            <th onclick="soDetailSort('in_way_from_client')" style="text-align:right">ОТ КЛИЕНТА ↕</th>
+          </tr>
+        </thead>
+        <tbody id="soDetailBody"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -102,10 +124,10 @@
       document.getElementById('soPagination').innerHTML = '';
       return;
     }
-    body.innerHTML = slice.map(r => `<tr class="fade-in">
+    body.innerHTML = slice.map(r => `<tr class="fade-in" style="cursor:pointer" onclick="soShowProducts('${r.office_name.replace(/'/g, "\\'")}', '${r.seller_name || ''}')">
       <td><span class="badge badge-orange">${r.seller_name || '—'}</span></td>
       <td>${r.region_name || '—'}</td>
-      <td>${r.office_name || '—'}</td>
+      <td><b>${r.office_name || '—'}</b></td>
       <td class="td-mono">${fmt(r.stock_count)}</td>
       <td class="td-mono" style="color:var(--green)">${fmtMoney(Math.round(r.stock_sum))}</td>
       <td class="td-mono">${r.sale_rate_days} дн</td>
@@ -113,6 +135,53 @@
       <td class="td-mono" style="color:var(--accent)">${fmt(r.from_client_count)}</td>
     </tr>`).join('');
     renderPagination('soPagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  let soDetailData = [], soDetailSortCol = 'quantity', soDetailSortDir = -1;
+
+  window.soShowProducts = async function(officeName, sellerName) {
+    const detail = document.getElementById('soDetail');
+    const body = document.getElementById('soDetailBody');
+    document.getElementById('soDetailTitle').textContent = 'Товары на складе: ' + officeName;
+    body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:20px;">Загрузка...</td></tr>';
+    detail.style.display = '';
+    detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    try {
+      const cab = WB.cabinet || '';
+      const res = await fetch(`/api/dashboard/stock-offices/products?office_name=${encodeURIComponent(officeName)}&cabinet_id=${encodeURIComponent(cab)}`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      soDetailData = await res.json();
+    } catch(e) {
+      soDetailData = [];
+      body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red);padding:20px;">Ошибка: ${e.message}</td></tr>`;
+      return;
+    }
+    soDetailRender();
+  };
+
+  window.soDetailSort = function(col) {
+    if (soDetailSortCol === col) soDetailSortDir *= -1;
+    else { soDetailSortCol = col; soDetailSortDir = -1; }
+    soDetailRender();
+  };
+
+  function soDetailRender() {
+    const body = document.getElementById('soDetailBody');
+    const sorted = soDetailData.slice().sort((a, b) => {
+      let va = a[soDetailSortCol], vb = b[soDetailSortCol];
+      if (va == null) va = 0; if (vb == null) vb = 0;
+      if (typeof va === 'string') return va.localeCompare(vb) * soDetailSortDir;
+      return (va - vb) * soDetailSortDir;
+    });
+    body.innerHTML = sorted.map(r => `<tr>
+      <td class="td-mono">${r.nm_id || '—'}</td>
+      <td>${esc(r.vendor_code || '—')}</td>
+      <td>${esc(r.product_name || '—')}</td>
+      <td class="td-mono" style="text-align:right;font-weight:600;">${fmt(r.quantity)}</td>
+      <td class="td-mono" style="text-align:right;color:var(--accent2)">${fmt(r.in_way_to_client)}</td>
+      <td class="td-mono" style="text-align:right;color:var(--accent)">${fmt(r.in_way_from_client)}</td>
+    </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:20px;">Нет товаров</td></tr>';
   }
 
   window.addEventListener('wb:tab-activated:stock-offices', soLoad);
