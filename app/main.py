@@ -1306,15 +1306,31 @@ def dashboard_stock_offices(
     days_back: int = Query(30, ge=1, le=90),
     db: Session = Depends(get_db),
 ):
-    """Остатки по складам и регионам."""
+    """Остатки по складам и регионам (только последний период на каждый склад)."""
     allowed = _get_user_cabinets(request, db)
     if allowed is not None and len(allowed) == 0:
         return []
     mapping = load_token_mapping()
     threshold = datetime.now() - timedelta(days=days_back)
 
-    q = db.query(StockByOffice).filter(StockByOffice.period_end >= threshold)
-    q = _filter_by_cabinets(q, allowed, StockByOffice.cabinet_id)
+    from sqlalchemy import func as sa_func
+
+    subq = db.query(
+        StockByOffice.cabinet_id,
+        StockByOffice.office_id,
+        sa_func.max(StockByOffice.period_end).label("max_pe"),
+    ).filter(
+        StockByOffice.period_end >= threshold
+    )
+    subq = _filter_by_cabinets(subq, allowed, StockByOffice.cabinet_id)
+    subq = subq.group_by(StockByOffice.cabinet_id, StockByOffice.office_id).subquery()
+
+    q = db.query(StockByOffice).join(
+        subq,
+        (StockByOffice.cabinet_id == subq.c.cabinet_id)
+        & (StockByOffice.office_id == subq.c.office_id)
+        & (StockByOffice.period_end == subq.c.max_pe),
+    )
     rows = q.order_by(StockByOffice.stock_sum.desc()).limit(50000).all()
 
     result = []
