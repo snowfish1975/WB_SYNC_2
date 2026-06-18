@@ -15,9 +15,71 @@
  *   const data = WBSync.getProducts('your-api-token');
  *   Logger.log(data.length + ' products loaded');
  *
- * Версия: 1.0.0
- * Дата: 2026-06-14
+ * Версия: 1.1.0
+ * Дата: 2026-06-18
  * Автор: WB Sync
+ * ============================================================
+ *
+ * МАППИНГ: Endpoints → WB API Sources
+ * ============================================================
+ *
+ * Функция               │ WB Sync Endpoint      │ WB API Source (внутри)
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getProducts()         │ POST /api/products     │ content-api.wildberries.ru
+ *                       │                       │   POST /content/v2/get/cards/list
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getStocks()           │ POST /api/stocks       │ seller-analytics-api.wildberries.ru
+ *                       │                       │   POST /api/analytics/v1/stocks-report/wb-warehouses
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getOrders()           │ POST /api/orders       │ statistics-api.wildberries.ru
+ *                       │                       │   GET /api/v1/supplier/orders
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getSales()            │ POST /api/sales        │ statistics-api.wildberries.ru
+ *                       │                       │   GET /api/v1/supplier/sales
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getPrices()           │ POST /api/prices       │ discounts-prices-api.wildberries.ru
+ *                       │                       │   GET /api/v2/list/goods/filter
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getSalesReport()      │ POST /api/sales-report │ statistics-api.wildberries.ru
+ *                       │                       │   GET /api/v5/supplier/reportDetailByPeriod
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getShelfMetrics()     │ POST /api/shelf-metrics│ seller-analytics-api.wildberries.ru
+ *                       │                       │   POST /api/analytics/v3/sales-funnel/products
+ *                       │                       │   (подневные данные, хранятся в БД)
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getFunnelMetrics()    │ POST /api/funnel-metrics│ seller-analytics-api.wildberries.ru
+ *                       │                       │   POST /api/analytics/v3/sales-funnel/products
+ *                       │                       │   (30-дневный агрегат)
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getStockOffices()     │ POST /api/stock-offices│ seller-analytics-api.wildberries.ru
+ *                       │                       │   POST /api/v2/stocks-report/offices
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getItemRatings()      │ POST /api/item-ratings │ seller-analytics-api.wildberries.ru
+ *                       │                       │   POST /api/analytics/v1/item-rating
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getAdCampaigns()      │ POST /api/ad-campaigns │ advert-api.wildberries.ru
+ *                       │                       │   GET /adv/v1/promotion/count
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getAdStats()          │ POST /api/ad-stats     │ advert-api.wildberries.ru
+ *                       │                       │   GET /adv/v3/fullstats
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getAdExpenses()       │ POST /api/ad-expenses  │ advert-api.wildberries.ru
+ *                       │                       │   GET /adv/v1/upd
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * getAdSearchClusters() │ POST /api/ad-search-clusters │ advert-api.wildberries.ru
+ *                       │                       │   POST /adv/v0/normquery/stats
+ * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
+ * healthCheck()         │ GET /api/health        │ (нет WB API — проверка WB Sync сервера)
+ * getCabinets()         │ GET /api/dashboard/cabinets │ (нет WB API — список кабинетов из БД)
+ *
+ * Rate Limits (WB API):
+ *   - content-api:     100 req/min
+ *   - statistics-api:  1 req/min (orders, sales, report)
+ *   - analytics-api:   3 req/min (funnel, stocks, ratings)
+ *   - advert-api:      10 req/min (clusters), глобальный 1 req/min (fullstats, upd)
+ *   - prices-api:      100 req/min
+ *
+ * Все POST-эндпоинты WB Sync принимают токен в теле запроса: { "token": "..." }
  * ============================================================
  */
 
