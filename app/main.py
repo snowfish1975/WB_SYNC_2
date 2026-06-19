@@ -2013,3 +2013,64 @@ def rnp_calc_month(
 ):
     from app.rnp_calc import calc_rnp_month
     return calc_rnp_month(db, cabinet_id, month, comparison_mode)
+
+
+# =====================
+# FORECAST
+# =====================
+
+@app.post("/api/forecast")
+def api_forecast(
+    body: TokenRequest,
+    nm_id: int | None = Query(None),
+    forecast_days: int = Query(7, ge=1, le=30),
+    metric: str = Query("revenue", description="revenue | orders"),
+    db: Session = Depends(get_db),
+):
+    """Прогноз продаж для кабинета (или конкретного товара)."""
+    from app.forecast import forecast as run_forecast
+    cid = token_id(body.token)
+    return run_forecast(db, cabinet_id=cid, nm_id=nm_id, forecast_days=forecast_days, metric=metric)
+
+
+@app.get("/api/dashboard/forecast")
+def dashboard_forecast(
+    request: Request,
+    cabinet_id: str | None = Query(None),
+    nm_id: int | None = Query(None),
+    forecast_days: int = Query(7, ge=1, le=30),
+    metric: str = Query("revenue", description="revenue | orders"),
+    db: Session = Depends(get_db),
+):
+    """Прогноз продаж для дашборда (по кабинету пользователя)."""
+    from app.forecast import forecast as run_forecast
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return {"history": [], "forecast": [], "methods": {}, "summary": {}}
+    if cabinet_id is None and allowed is not None and len(allowed) == 1:
+        cabinet_id = allowed[0]
+    return run_forecast(db, cabinet_id=cabinet_id, nm_id=nm_id, forecast_days=forecast_days, metric=metric)
+
+
+@app.get("/api/dashboard/forecast-top")
+def dashboard_forecast_top(
+    request: Request,
+    cabinet_id: str | None = Query(None),
+    forecast_days: int = Query(7, ge=1, le=30),
+    metric: str = Query("revenue"),
+    limit: int = Query(100, le=500),
+    db: Session = Depends(get_db),
+):
+    """Прогноз для топ товаров."""
+    from app.forecast import forecast_top_products
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
+    if cabinet_id is None and allowed is not None and len(allowed) == 1:
+        cabinet_id = allowed[0]
+    mapping = load_token_mapping()
+    results = forecast_top_products(db, cabinet_id=cabinet_id, forecast_days=forecast_days, metric=metric, limit=limit)
+    for r in results:
+        cid = cabinet_id or ""
+        r["seller_name"] = mapping.get(cid, cid[:8]) if cid else ""
+    return results

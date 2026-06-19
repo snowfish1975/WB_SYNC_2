@@ -374,15 +374,20 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
                         db.commit()
                     logger.info(f"[{name}] Статистика рекламы: {len(all_stats)} кампаний")
 
-                # Затраты
-                expenses = await fetch_ad_expenses(token, date_from_30, date_to)
-                clear_ad_expenses(db, tid)
-                for exp in expenses:
-                    upsert_ad_expense(db, tid, exp)
-                db.commit()
+                # Затраты (отдельный try — не зависит от статистики)
+                try:
+                    expenses = await fetch_ad_expenses(token, date_from_30, date_to)
+                    clear_ad_expenses(db, tid)
+                    for exp in expenses:
+                        upsert_ad_expense(db, tid, exp)
+                    db.commit()
+                    result["ad_expenses"] = len(expenses)
+                    logger.info(f"[{name}] Затраты на рекламу: {len(expenses)}")
+                except Exception as e:
+                    logger.error(f"[{name}] ошибка загрузки затрат: {e}")
+
                 result["ad_campaigns"] = len(ad_campaigns)
                 result["ad_stats_camps"] = len(active_ids) if active_ids else 0
-                result["ad_expenses"] = len(expenses)
                 
                 # Поисковые кластеры: извлекаем advert_id + nm_id из деталей кампаний
                 clusters_count = 0

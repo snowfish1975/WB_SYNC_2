@@ -16,6 +16,7 @@ const TAB_SRCS = {
   'item-ratings':  '/static/tabs/item-ratings.html',
   'ad':            '/static/tabs/advert.html',
   'stock-forecast': '/static/tabs/stock-forecast.html',
+  'sales-forecast': '/static/tabs/sales-forecast.html',
   'unit-economics': '/static/tabs/unit-economics.html',
   'search-clusters': '/static/tabs/search-clusters.html',
   'rnp':               '/static/tabs/rnp.html',

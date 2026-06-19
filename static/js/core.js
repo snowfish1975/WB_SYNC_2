@@ -23,6 +23,14 @@ window.fmtMoney = function(n) {
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n) + ' ₽';
 };
 
+window.fmtShort = function(n) {
+  if (n == null) return '—';
+  n = Number(n);
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1).replace('.0', '') + 'M';
+  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1).replace('.0', '') + 'K';
+  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n);
+};
+
 window.fmtDate = function(s) {
   if (!s) return '—';
   const d = new Date(s);

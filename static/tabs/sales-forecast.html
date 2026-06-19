@@ -1,0 +1,252 @@
+<!-- ============================================================
+     TAB: ПРОГНОЗ ПРОДАЖ (ML)
+     ============================================================ -->
+<div id="salesForecastTab">
+  <div class="summary-grid section-mb" id="sfMetrics2"></div>
+
+  <div class="card section-mb">
+    <div class="section-title">Прогноз продаж (7/14/30 дней)</div>
+    <div class="filters">
+      <select class="filter-select" id="sfMetric" onchange="sfLoad2()">
+        <option value="revenue">Выручка (₽)</option>
+        <option value="orders">Заказы (шт)</option>
+      </select>
+      <select class="filter-select" id="sfDays" onchange="sfLoad2()">
+        <option value="7">7 дней</option>
+        <option value="14">14 дней</option>
+        <option value="30">30 дней</option>
+      </select>
+    </div>
+    <div style="position:relative;height:350px;">
+      <canvas id="sfChart2"></canvas>
+    </div>
+  </div>
+
+  <div class="card section-mb">
+    <div class="section-title">Прогноз по товарам</div>
+    <div class="filters">
+      <input class="filter-input" id="sfSearch2" placeholder="Артикул / товар..." oninput="sfFilter2()">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="sfSort2('subject')">ТОВАР ↕</th>
+          <th onclick="sfSort2('nm_id')">АРТ WB ↕</th>
+          <th onclick="sfSort2('total_revenue_40d')">ФАКТ 40Д ↕</th>
+          <th onclick="sfSort2('forecast_total')">ПРОГНОЗ ↕</th>
+          <th onclick="sfSort2('trend')">ТРЕНД ↕</th>
+          <th onclick="sfSort2('avg_forecast')">СРЕДНЕЕ/ДЕНЬ ↕</th>
+        </tr></thead>
+        <tbody id="sfBody2"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="sfPagination2"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let chart2 = null;
+  let topData = [], topFiltered = [], topPage = 1;
+  const TOP_PER = 50;
+  let topSortCol = 'forecast_total', topSortDir = -1;
+
+  async function sfLoad2() {
+    const metric = document.getElementById('sfMetric')?.value || 'revenue';
+    const days = document.getElementById('sfDays')?.value || '7';
+    const cabinet = WB.cabinet || '';
+
+    try {
+      let url = `/api/dashboard/forecast?forecast_days=${days}&metric=${metric}`;
+      if (cabinet) url += `&cabinet_id=${cabinet}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      renderChart2(data, metric);
+      renderMetrics2(data.summary);
+    } catch(e) {
+      console.error('Forecast load error:', e);
+    }
+
+    try {
+      let topUrl = `/api/dashboard/forecast-top?forecast_days=${days}&metric=${metric}&limit=500`;
+      if (cabinet) topUrl += `&cabinet_id=${cabinet}`;
+      const res2 = await fetch(topUrl);
+      topData = await res2.json();
+      topData.forEach(r => {
+        r.forecast_total = r.forecast?.total_forecast || 0;
+        r.trend = r.forecast?.trend_percent || 0;
+        r.avg_forecast = r.forecast?.avg_forecast || 0;
+      });
+      sfFilter2();
+    } catch(e) {
+      topData = [];
+      sfFilter2();
+    }
+  }
+  window.sfLoad2 = sfLoad2;
+
+  function renderMetrics2(s) {
+    const m = document.getElementById('sfMetrics2');
+    if (!m || !s) return;
+    const trendIcon = s.trend_percent >= 0 ? '📈' : '📉';
+    const trendColor = s.trend_percent >= 0 ? 'var(--green)' : 'var(--red)';
+    m.innerHTML = `
+      <div class="card metric-card teal"><div class="metric-label">СРЕДНЕЕ/ДЕНЬ (факт)</div><div class="metric-value">${fmtShort(s.avg_historical_7d)}</div><div class="metric-sub">за 7 дней</div></div>
+      <div class="card metric-card teal"><div class="metric-label">СРЕДНЕЕ/ДЕНЬ (прогноз)</div><div class="metric-value">${fmtShort(s.avg_forecast)}</div><div class="metric-sub">${s.forecast_days} дней</div></div>
+      <div class="card metric-card" style="border-color:${trendColor}"><div class="metric-label">ТРЕНД ${trendIcon}</div><div class="metric-value" style="color:${trendColor}">${s.trend_percent >= 0 ? '+' : ''}${s.trend_percent}%</div><div class="metric-sub">к среднему</div></div>
+      <div class="card metric-card teal"><div class="metric-label">ИТОГО ПРОГНОЗ</div><div class="metric-value">${fmtShort(s.total_forecast)}</div><div class="metric-sub">за ${s.forecast_days} дней</div></div>
+    `;
+  }
+
+  function renderChart2(data, metric) {
+    const ctx = document.getElementById('sfChart2');
+    if (!ctx) return;
+
+    const labels = [...data.history.map(h => h.date), ...data.forecast.map(f => f.date)];
+    const historical = data.history.map(h => h.value);
+    const forecastVals = new Array(data.history.length).fill(null);
+    const upperVals = new Array(data.history.length).fill(null);
+    const lowerVals = new Array(data.history.length).fill(null);
+
+    data.forecast.forEach((f, i) => {
+      forecastVals[data.history.length + i] = f.value;
+      upperVals[data.history.length + i] = f.upper;
+      lowerVals[data.history.length + i] = f.lower;
+    });
+
+    if (chart2) chart2.destroy();
+
+    chart2 = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Факт',
+            data: historical,
+            borderColor: 'rgba(59,130,246,1)',
+            backgroundColor: 'rgba(59,130,246,0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 1,
+            borderWidth: 2,
+          },
+          {
+            label: 'Прогноз',
+            data: forecastVals,
+            borderColor: 'rgba(239,68,68,1)',
+            backgroundColor: 'rgba(239,68,68,0.1)',
+            borderDash: [5, 5],
+            fill: false,
+            tension: 0.3,
+            pointRadius: 2,
+            borderWidth: 2,
+          },
+          {
+            label: 'Верх (80%)',
+            data: upperVals,
+            borderColor: 'transparent',
+            backgroundColor: 'rgba(239,68,68,0.08)',
+            fill: '+1',
+            pointRadius: 0,
+            borderWidth: 0,
+          },
+          {
+            label: 'Низ (80%)',
+            data: lowerVals,
+            borderColor: 'transparent',
+            backgroundColor: 'rgba(239,68,68,0.08)',
+            fill: false,
+            pointRadius: 0,
+            borderWidth: 0,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { intersect: false, mode: 'index' },
+        plugins: {
+          legend: { display: true, position: 'top', labels: { font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                if (ctx.dataset.label === 'Верх (80%)' || ctx.dataset.label === 'Низ (80%)') return null;
+                return ctx.dataset.label + ': ' + fmtShort(ctx.parsed.y);
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { maxTicksLimit: 15, font: { size: 10 } },
+            grid: { display: false },
+          },
+          y: {
+            ticks: { callback: v => fmtShort(v), font: { size: 10 } },
+            grid: { color: 'rgba(255,255,255,0.05)' },
+          },
+        },
+      },
+    });
+  }
+
+  function sfFilter2() {
+    const search = (document.getElementById('sfSearch2')?.value || '').toLowerCase();
+    topFiltered = topData.filter(r => {
+      if (WB.cabinet && r.cabinet_id !== WB.cabinet) return false;
+      if (search && !`${r.nm_id}`.includes(search) && !`${(r.supplier_article||'')}`.toLowerCase().includes(search) && !`${(r.subject||'')}`.toLowerCase().includes(search)) return false;
+      return true;
+    });
+    topSort2();
+  }
+  window.sfFilter2 = sfFilter2;
+
+  function sfSort2(col) {
+    if (topSortCol === col) topSortDir *= -1; else { topSortCol = col; topSortDir = -1; }
+    topSort2();
+  }
+  window.sfSort2 = sfSort2;
+
+  function topSort2() {
+    topFiltered.sort((a, b) => {
+      let va = a[topSortCol], vb = b[topSortCol];
+      if (va == null) va = topSortDir > 0 ? Infinity : -Infinity;
+      if (vb == null) vb = topSortDir > 0 ? Infinity : -Infinity;
+      if (typeof va === 'string') return va.localeCompare(vb) * topSortDir;
+      return (va - vb) * topSortDir;
+    });
+    topPage = 1;
+    renderTop2();
+  }
+
+  function renderTop2() {
+    const body = document.getElementById('sfBody2');
+    if (!body) return;
+    if (!topFiltered.length) {
+      body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:30px;">Нет данных</td></tr>';
+      document.getElementById('sfPagination2').innerHTML = '';
+      return;
+    }
+    const slice = topFiltered.slice((topPage-1)*TOP_PER, topPage*TOP_PER);
+    body.innerHTML = slice.map(r => {
+      const trend = r.trend || 0;
+      const tColor = trend >= 0 ? 'var(--green)' : 'var(--red)';
+      const tIcon = trend >= 0 ? '↑' : '↓';
+      return `<tr>
+        <td>${r.subject || '—'}</td>
+        <td class="td-mono">${r.nm_id}</td>
+        <td class="td-mono">${fmt(r.total_revenue_40d)}</td>
+        <td class="td-mono">${fmt(r.forecast_total)}</td>
+        <td class="td-mono" style="color:${tColor};font-weight:bold">${tIcon} ${trend >= 0 ? '+' : ''}${trend}%</td>
+        <td class="td-mono">${fmt(r.avg_forecast)}</td>
+      </tr>`;
+    }).join('');
+    renderPagination('sfPagination2', topFiltered.length, TOP_PER, topPage, p => { topPage = p; renderTop2(); });
+  }
+
+  window.addEventListener('wb:tab-activated:sales-forecast', sfLoad2);
+  window.addEventListener('wb:period-changed', () => { if (topData.length) sfLoad2(); });
+  window.addEventListener('wb:cabinet-changed', () => { sfFilter2(); });
+})();
+</script>
