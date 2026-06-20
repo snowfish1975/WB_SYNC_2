@@ -31,6 +31,7 @@ from app.crud import (
     clear_ad_search_clusters, upsert_ad_search_cluster,
 )
 from app.database import SessionLocal
+from app.models import ShelfMetric
 
 logger = logging.getLogger(__name__)
 
