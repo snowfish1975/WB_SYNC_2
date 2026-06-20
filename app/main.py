@@ -739,6 +739,62 @@ def trigger_sales_report_backfill(days: int = Query(40, ge=1, le=90)):
     return {"status": "started", "days": days}
 
 
+@app.post("/api/sync/trigger-logistics")
+def trigger_logistics_sync():
+    """Принудительная загрузка складов и тарифов."""
+    import threading
+
+    def _run():
+        import asyncio
+        from app.database import SessionLocal
+        from app.logistics_client import fetch_warehouses, fetch_tariffs_box, fetch_tariffs_pallet, fetch_tariffs_acceptance, fetch_tariffs_return
+        from app.crud import upsert_warehouse, clear_warehouses, upsert_tariff_box, clear_tariff_boxes, upsert_tariff_pallet, clear_tariff_pallets, upsert_tariff_acceptance, clear_tariff_acceptances, upsert_tariff_return, clear_tariff_returns
+        from app.scheduler import load_tokens_from_json
+        from datetime import date
+
+        cabinets = load_tokens_from_json()
+        if not cabinets:
+            return
+        token = cabinets[0]["token"]
+        today = date.today().strftime("%Y-%m-%d")
+        db = SessionLocal()
+        try:
+            wh = asyncio.run(fetch_warehouses(token))
+            clear_warehouses(db)
+            for item in wh:
+                upsert_warehouse(db, item)
+            db.commit()
+
+            box = asyncio.run(fetch_tariffs_box(token, today))
+            clear_tariff_boxes(db)
+            for item in (box.get("warehouseList") or []):
+                upsert_tariff_box(db, item, today)
+            db.commit()
+
+            pallet = asyncio.run(fetch_tariffs_pallet(token, today))
+            clear_tariff_pallets(db)
+            for item in (pallet.get("warehouseList") or []):
+                upsert_tariff_pallet(db, item, today)
+            db.commit()
+
+            acc = asyncio.run(fetch_tariffs_acceptance(token))
+            clear_tariff_acceptances(db)
+            for item in acc:
+                upsert_tariff_acceptance(db, item)
+            db.commit()
+
+            ret = asyncio.run(fetch_tariffs_return(token, today))
+            clear_tariff_returns(db)
+            for item in (ret.get("warehouseList") or []):
+                upsert_tariff_return(db, item, today)
+            db.commit()
+        finally:
+            db.close()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "started"}
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
@@ -2074,3 +2130,93 @@ def dashboard_forecast_top(
         cid = cabinet_id or ""
         r["seller_name"] = mapping.get(cid, cid[:8]) if cid else ""
     return results
+
+
+# =====================
+# CLAIMS (Возвраты)
+# =====================
+
+@app.post("/api/claims")
+def api_list_claims(
+    body: TokenRequest,
+    status: int | None = Query(None, description="0=рассм, 1=отказ, 2=одобрено"),
+    limit: int = Query(1000, le=50000),
+    db: Session = Depends(get_db),
+):
+    """Список claims (возвратов) для кабинета."""
+    from app.crud import get_claims
+    cid = token_id(body.token)
+    return get_claims(db, cabinet_id=cid, status=status, limit=limit)
+
+
+@app.get("/api/dashboard/claims")
+def dashboard_claims(
+    request: Request,
+    cabinet_id: str | None = Query(None),
+    days_back: int = Query(14, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Статистика claims для дашборда."""
+    from app.crud import get_claims_stats
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return {"total": 0, "pending": 0, "rejected": 0, "approved": 0, "top_products": [], "top_reasons": []}
+    if cabinet_id is None and allowed is not None and len(allowed) == 1:
+        cabinet_id = allowed[0]
+    return get_claims_stats(db, cabinet_id=cabinet_id, days_back=days_back)
+
+
+@app.get("/api/dashboard/claims-list")
+def dashboard_claims_list(
+    request: Request,
+    cabinet_id: str | None = Query(None),
+    status: int | None = Query(None),
+    limit: int = Query(1000, le=50000),
+    db: Session = Depends(get_db),
+):
+    """Список claims для дашборда."""
+    from app.crud import get_claims
+    from app.crud import load_token_mapping
+    allowed = _get_user_cabinets(request, db)
+    if allowed is not None and len(allowed) == 0:
+        return []
+    if cabinet_id is None and allowed is not None and len(allowed) == 1:
+        cabinet_id = allowed[0]
+    mapping = load_token_mapping()
+    rows = get_claims(db, cabinet_id=cabinet_id, status=status, limit=limit)
+    result = []
+    for r in rows:
+        row = {k: v for k, v in r.__dict__.items() if not k.startswith("_")}
+        row["seller_name"] = mapping.get(r.cabinet_id, r.cabinet_id[:8])
+        for k, v in row.items():
+            if hasattr(v, "isoformat"):
+                row[k] = v.isoformat()
+        result.append(row)
+    return JSONResponse(content=result)
+
+
+# =====================
+# LOGISTICS (Склады и тарифы)
+# =====================
+
+@app.get("/api/dashboard/warehouses")
+def dashboard_warehouses():
+    """Список складов WB."""
+    from app.crud import get_warehouses
+    return get_warehouses(get_db().__next__())
+
+
+@app.get("/api/dashboard/tariffs")
+def dashboard_tariffs():
+    """Все тарифы: короба + паллеты + приёмка + возврат."""
+    from app.crud import get_tariff_boxes, get_tariff_pallets, get_tariff_acceptances, get_tariff_returns
+    db = get_db().__next__()
+    try:
+        return {
+            "boxes": [{k: v for k, v in r.__dict__.items() if not k.startswith("_")} for r in get_tariff_boxes(db)],
+            "pallets": [{k: v for k, v in r.__dict__.items() if not k.startswith("_")} for r in get_tariff_pallets(db)],
+            "acceptances": [{k: v for k, v in r.__dict__.items() if not k.startswith("_")} for r in get_tariff_acceptances(db)],
+            "returns": [{k: v for k, v in r.__dict__.items() if not k.startswith("_")} for r in get_tariff_returns(db)],
+        }
+    finally:
+        db.close()

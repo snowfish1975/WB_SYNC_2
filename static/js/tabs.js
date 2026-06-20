@@ -21,6 +21,7 @@ const TAB_SRCS = {
   'search-clusters': '/static/tabs/search-clusters.html',
   'rnp':               '/static/tabs/rnp.html',
   'logistics':         '/static/tabs/logistics.html',
+  'claims':            '/static/tabs/claims.html',
   'profile':         '/static/tabs/profile.html',
   'admin':           '/static/tabs/admin.html',
 };

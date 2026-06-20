@@ -274,3 +274,92 @@
   });
 })();
 </script>
+
+<!-- ТАРИФЫ -->
+<div class="card section-mb" style="margin-top:24px;">
+  <div class="section-title">Тарифы WB (склады, хранение, доставка)</div>
+  <div class="filters">
+    <select class="filter-select" id="tariffType" onchange="tariffLoad()">
+      <option value="boxes">Короба</option>
+      <option value="pallets">Монопаллеты</option>
+      <option value="returns">Возврат</option>
+    </select>
+    <input class="filter-input" id="tariffSearch" placeholder="Название склада..." oninput="tariffFilter()">
+  </div>
+  <div class="table-wrap">
+    <table style="font-size:12px;">
+      <thead><tr>
+        <th onclick="tariffSort('warehouse_name')">СКЛАД ↕</th>
+        <th onclick="tariffSort('delivery_base')">ЛОГИСТИКА ₽/л ↕</th>
+        <th onclick="tariffSort('storage_base')">ХРАНЕНИЕ ₽/день ↕</th>
+        <th onclick="tariffSort('delivery_coef')">КОЭФ ЛОГИСТИКИ ↕</th>
+        <th onclick="tariffSort('storage_coef')">КОЭФ ХРАНЕНИЯ ↕</th>
+      </tr></thead>
+      <tbody id="tariffBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function() {
+  let tariffData = [], tariffFiltered = [];
+  let tSortCol = 'warehouse_name', tSortDir = 1;
+
+  async function tariffLoad() {
+    try {
+      const res = await fetch('/api/dashboard/tariffs');
+      const data = await res.json();
+      const type = document.getElementById('tariffType')?.value || 'boxes';
+      tariffData = (data[type] || []).map(r => ({
+        warehouse_name: r.warehouse_name || '',
+        delivery_base: r.delivery_base || r.delivery_value_base || r.delivery_dump_sup_office_base || '',
+        storage_base: r.storage_base || r.storage_value || '',
+        delivery_coef: r.delivery_coef || r.delivery_expr || '',
+        storage_coef: r.storage_coef || r.storage_expr || '',
+      }));
+      tariffFilter();
+    } catch(e) { tariffData = []; tariffFilter(); }
+  }
+  window.tariffLoad = tariffLoad;
+
+  function tariffFilter() {
+    const search = (document.getElementById('tariffSearch')?.value || '').toLowerCase();
+    tariffFiltered = tariffData.filter(r => !search || r.warehouse_name.toLowerCase().includes(search));
+    tSortData();
+  }
+  window.tariffFilter = tariffFilter;
+
+  function tariffSort(col) {
+    if (tSortCol === col) tSortDir *= -1; else { tSortCol = col; tSortDir = 1; }
+    tSortData();
+  }
+  window.tariffSort = tariffSort;
+
+  function tSortData() {
+    tariffFiltered.sort((a, b) => {
+      let va = a[tSortCol], vb = b[tSortCol];
+      if (typeof va === 'string') return va.localeCompare(vb) * tSortDir;
+      return ((va||0) - (vb||0)) * tSortDir;
+    });
+    tariffRender();
+  }
+
+  function tariffRender() {
+    const body = document.getElementById('tariffBody');
+    if (!body) return;
+    if (!tariffFiltered.length) { body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px;">Нет данных</td></tr>'; return; }
+    body.innerHTML = tariffFiltered.map(r => `<tr>
+      <td>${esc(r.warehouse_name)}</td>
+      <td class="td-mono">${r.delivery_base || '—'}</td>
+      <td class="td-mono">${r.storage_base || '—'}</td>
+      <td class="td-mono">${r.delivery_coef || '—'}</td>
+      <td class="td-mono">${r.storage_coef || '—'}</td>
+    </tr>`).join('');
+  }
+
+  function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+
+  window.addEventListener('wb:tab-activated:logistics', tariffLoad);
+  window.addEventListener('wb:cabinet-changed', tariffLoad);
+})();
+</script>

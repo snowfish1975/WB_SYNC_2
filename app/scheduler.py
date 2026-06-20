@@ -16,6 +16,8 @@ from app.wb_client import (
     fetch_sales_stream,
 )
 from app.wb_analytics_client import fetch_sales_funnel, fetch_stock_by_offices, fetch_item_rating, fetch_ad_campaigns, fetch_ad_campaign_details, fetch_ad_stats, fetch_ad_expenses, fetch_ad_search_clusters
+from app.returns_client import fetch_claims
+from app.logistics_client import fetch_warehouses, fetch_tariffs_box, fetch_tariffs_pallet, fetch_tariffs_acceptance, fetch_tariffs_return
 from app.crud import (
     upsert_characteristic, upsert_stock, log_sync, upsert_price,
     upsert_sales_report_row, upsert_orders_bulk, upsert_sales_bulk,
@@ -29,9 +31,15 @@ from app.crud import (
     clear_ad_stats, upsert_ad_stats,
     clear_ad_expenses, upsert_ad_expense,
     clear_ad_search_clusters, upsert_ad_search_cluster,
+    upsert_claim,
+    upsert_warehouse, clear_warehouses,
+    upsert_tariff_box, clear_tariff_boxes,
+    upsert_tariff_pallet, clear_tariff_pallets,
+    upsert_tariff_acceptance, clear_tariff_acceptances,
+    upsert_tariff_return, clear_tariff_returns,
 )
 from app.database import SessionLocal
-from app.models import ShelfMetric
+from app.models import ShelfMetric, Warehouse
 
 logger = logging.getLogger(__name__)
 
@@ -433,7 +441,68 @@ async def sync_one_cabinet(token: str, name: str) -> dict:
             logger.error(f"[{name}] ошибка аналитики: {e}")
             result["analytics_error"] = str(e)[:200]
 
-        log_sync(db, tid, "ok", records=chars_count + stocks_count + orders_count + prices_count + sales_count + result.get("shelf_count", 0) + result.get("funnel_count", 0) + result.get("offices_count", 0) + result.get("ratings_count", 0) + result.get("ad_expenses", 0))
+        # --- Возвраты / Претензии покупателей ---
+        try:
+            logger.info(f"[{name}] загрузка claims (возвраты)...")
+            claims_data = await fetch_claims(token, is_archive=False)
+            claims_count = 0
+            for claim in claims_data:
+                upsert_claim(db, tid, claim)
+                claims_count += 1
+            db.commit()
+            result["claims_count"] = claims_count
+            logger.info(f"[{name}] Claims (возвраты): {claims_count}")
+        except Exception as e:
+            logger.error(f"[{name}] ошибка claims: {e}")
+
+        # --- Логистика: склады и тарифы (один раз, не per-cabinet) ---
+        # Загружаем только если ещё не загружены сегодня
+        try:
+            from sqlalchemy import func as sa_func
+            wh_count = db.query(sa_func.count(Warehouse.id)).scalar() or 0
+            if wh_count == 0:
+                logger.info("Загрузка складов и тарифов (первый запуск)...")
+                warehouses = await fetch_warehouses(token)
+                clear_warehouses(db)
+                for wh in warehouses:
+                    upsert_warehouse(db, wh)
+                db.commit()
+                logger.info(f"Склады WB: {len(warehouses)}")
+
+                from datetime import date
+                today = date.today().strftime("%Y-%m-%d")
+
+                tariffs_box = await fetch_tariffs_box(token, today)
+                clear_tariff_boxes(db)
+                for wh in (tariffs_box.get("warehouseList") or []):
+                    upsert_tariff_box(db, wh, today)
+                db.commit()
+                logger.info(f"Тарифы короба: {len(tariffs_box.get('warehouseList') or [])}")
+
+                tariffs_pallet = await fetch_tariffs_pallet(token, today)
+                clear_tariff_pallets(db)
+                for wh in (tariffs_pallet.get("warehouseList") or []):
+                    upsert_tariff_pallet(db, wh, today)
+                db.commit()
+                logger.info(f"Тарифы паллеты: {len(tariffs_pallet.get('warehouseList') or [])}")
+
+                acceptances = await fetch_tariffs_acceptance(token)
+                clear_tariff_acceptances(db)
+                for item in acceptances:
+                    upsert_tariff_acceptance(db, item)
+                db.commit()
+                logger.info(f"Тарифы приёмки: {len(acceptances)}")
+
+                tariffs_return = await fetch_tariffs_return(token, today)
+                clear_tariff_returns(db)
+                for wh in (tariffs_return.get("warehouseList") or []):
+                    upsert_tariff_return(db, wh, today)
+                db.commit()
+                logger.info(f"Тарифы возврата: {len(tariffs_return.get('warehouseList') or [])}")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки логистики: {e}")
+
+        log_sync(db, tid, "ok", records=chars_count + stocks_count + orders_count + prices_count + sales_count + result.get("shelf_count", 0) + result.get("funnel_count", 0) + result.get("offices_count", 0) + result.get("ratings_count", 0) + result.get("ad_expenses", 0) + result.get("claims_count", 0))
         db.commit()
 
     except Exception as e:

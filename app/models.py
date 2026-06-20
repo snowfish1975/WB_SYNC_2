@@ -696,3 +696,156 @@ class RnpPlan(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("cabinet_id", "month", name="uq_rnp_plan"),)
+
+
+# =====================
+# CLAIMS (Возвраты / Претензии покупателей)
+# =====================
+
+
+class Claim(Base):
+    """Заявка покупателя на возврат товара (returns-api /api/v1/claims)."""
+    __tablename__ = "claims"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    claim_id: Mapped[str] = mapped_column(String(36), nullable=False)  # UUID от WB
+
+    nm_id: Mapped[int] = mapped_column(Integer, nullable=True, index=True)
+    srid: Mapped[str] = mapped_column(String(100), nullable=True, index=True)
+    imt_name: Mapped[str] = mapped_column(String(500), nullable=True)
+
+    claim_type: Mapped[int] = mapped_column(Integer, default=0)  # 1=портал, 3=чат
+    status: Mapped[int] = mapped_column(Integer, default=0)  # 0=рассм, 1=отказ, 2=одобрено
+    status_ex: Mapped[int] = mapped_column(Integer, default=0)  # детальный статус
+
+    user_comment: Mapped[str] = mapped_column(Text, nullable=True)
+    wb_comment: Mapped[str] = mapped_column(Text, nullable=True)
+
+    price: Mapped[float] = mapped_column(Float, default=0.0)
+    currency_code: Mapped[str] = mapped_column(String(10), nullable=True)
+
+    dt: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # дата заявки
+    order_dt: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # дата заказа
+    dt_update: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # дата обновления
+    delivery_dt: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # дата доставки
+
+    photos: Mapped[list] = mapped_column(JSON, nullable=True)  # список фото
+    video_paths: Mapped[list] = mapped_column(JSON, nullable=True)  # список видео
+    actions: Mapped[list] = mapped_column(JSON, nullable=True)  # доступные действия
+
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (UniqueConstraint("cabinet_id", "claim_id", name="uq_claim"),)
+
+
+# =====================
+# LOGISTICS (Склады и тарифы)
+# =====================
+
+
+class Warehouse(Base):
+    """Склад WB (из /api/v3/offices)."""
+    __tablename__ = "warehouses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    office_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    address: Mapped[str] = mapped_column(String(500), nullable=True)
+    city: Mapped[str] = mapped_column(String(200), nullable=True)
+    cargo_type: Mapped[int] = mapped_column(Integer, default=0)
+    delivery_type: Mapped[int] = mapped_column(Integer, default=0)
+    federal_district: Mapped[str] = mapped_column(String(200), nullable=True)
+    longitude: Mapped[float] = mapped_column(Float, nullable=True)
+    latitude: Mapped[float] = mapped_column(Float, nullable=True)
+    selected: Mapped[bool] = mapped_column(Boolean, default=False)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class TariffBox(Base):
+    """Тарифы для коробов (из /api/v1/tariffs/box)."""
+    __tablename__ = "tariff_boxes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    warehouse_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    geo_name: Mapped[str] = mapped_column(String(200), nullable=True)
+    delivery_base: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_coef: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_liter: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_marketplace_base: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_marketplace_coef: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_marketplace_liter: Mapped[str] = mapped_column(String(50), nullable=True)
+    storage_base: Mapped[str] = mapped_column(String(50), nullable=True)
+    storage_coef: Mapped[str] = mapped_column(String(50), nullable=True)
+    storage_liter: Mapped[str] = mapped_column(String(50), nullable=True)
+    tariff_date: Mapped[str] = mapped_column(String(50), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (UniqueConstraint("warehouse_name", name="uq_tariff_box"),)
+
+
+class TariffPallet(Base):
+    """Тарифы для монопаллет (из /api/v1/tariffs/pallet)."""
+    __tablename__ = "tariff_pallets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    warehouse_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    delivery_expr: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_value_base: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_value_liter: Mapped[str] = mapped_column(String(50), nullable=True)
+    storage_expr: Mapped[str] = mapped_column(String(50), nullable=True)
+    storage_value: Mapped[str] = mapped_column(String(50), nullable=True)
+    tariff_date: Mapped[str] = mapped_column(String(50), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (UniqueConstraint("warehouse_name", name="uq_tariff_pallet"),)
+
+
+class TariffAcceptance(Base):
+    """Тарифы на приёмку (из /api/tariffs/v1/acceptance/coefficients)."""
+    __tablename__ = "tariff_acceptances"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    warehouse_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    warehouse_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    date: Mapped[str] = mapped_column(String(50), nullable=False)
+    coefficient: Mapped[float] = mapped_column(Float, default=0)
+    allow_unload: Mapped[bool] = mapped_column(Boolean, default=False)
+    box_type_id: Mapped[int] = mapped_column(Integer, default=0)
+    is_sorting_center: Mapped[bool] = mapped_column(Boolean, default=False)
+    storage_coef: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_coef: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_base_liter: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_additional_liter: Mapped[str] = mapped_column(String(50), nullable=True)
+    storage_base_liter: Mapped[str] = mapped_column(String(50), nullable=True)
+    storage_additional_liter: Mapped[str] = mapped_column(String(50), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (UniqueConstraint("warehouse_id", "date", "box_type_id", name="uq_tariff_acceptance"),)
+
+
+class TariffReturn(Base):
+    """Тарифы на возврат (из /api/v1/tariffs/return)."""
+    __tablename__ = "tariff_returns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    warehouse_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    delivery_dump_kgt_office_base: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_dump_kgt_office_liter: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_dump_kgt_return: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_dump_srg_office: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_dump_srg_return: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_dump_sup_courier_base: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_dump_sup_courier_liter: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_dump_sup_office_base: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_dump_sup_office_liter: Mapped[str] = mapped_column(String(50), nullable=True)
+    delivery_dump_sup_return: Mapped[str] = mapped_column(String(50), nullable=True)
+    tariff_date: Mapped[str] = mapped_column(String(50), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    raw_data: Mapped[dict] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (UniqueConstraint("warehouse_name", name="uq_tariff_return"),)

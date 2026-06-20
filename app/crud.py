@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from app.models import ProductCharacteristic, SyncLog, Stock, Order, Price, SalesReport, Sale, User, ApiKey, WbToken, ShelfMetric, FunnelMetric, StockByOffice, ItemRating, AdCampaign, AdCampaignStats, AdExpense, AdSearchCluster
+from app.models import ProductCharacteristic, SyncLog, Stock, Order, Price, SalesReport, Sale, User, ApiKey, WbToken, ShelfMetric, FunnelMetric, StockByOffice, ItemRating, AdCampaign, AdCampaignStats, AdExpense, AdSearchCluster, Claim, Warehouse, TariffBox, TariffPallet, TariffAcceptance, TariffReturn
 from datetime import datetime, timedelta
 import os
 import hashlib
@@ -1603,3 +1603,290 @@ def upsert_rnp_plans_bulk(db: Session, cabinet_id: str, items: list[dict]):
 def delete_rnp_plan(db: Session, cabinet_id: str, plan_id: int):
     db.query(RnpPlan).filter(RnpPlan.id == plan_id, RnpPlan.cabinet_id == cabinet_id).delete()
     db.commit()
+
+
+# -------------------------
+# Claims (Возвраты)
+# -------------------------
+
+def upsert_claim(db: Session, cabinet_id: str, item: dict):
+    claim_id = item.get("id", "")
+    stmt = pg_insert(Claim).values(
+        cabinet_id=cabinet_id,
+        claim_id=claim_id,
+        nm_id=item.get("nm_id"),
+        srid=item.get("srid"),
+        imt_name=item.get("imt_name"),
+        claim_type=item.get("claim_type", 0),
+        status=item.get("status", 0),
+        status_ex=item.get("status_ex", 0),
+        user_comment=item.get("user_comment", ""),
+        wb_comment=item.get("wb_comment"),
+        price=item.get("price", 0),
+        currency_code=item.get("currency_code"),
+        dt=_parse_dt(item.get("dt")),
+        order_dt=_parse_dt(item.get("order_dt")),
+        dt_update=_parse_dt(item.get("dt_update")),
+        delivery_dt=_parse_dt(item.get("delivery_dt")),
+        photos=item.get("photos"),
+        video_paths=item.get("video_paths"),
+        actions=item.get("actions"),
+        raw_data=item,
+    ).on_conflict_do_update(
+        constraint="uq_claim",
+        set_={
+            "status": pg_insert(Claim).excluded.status,
+            "status_ex": pg_insert(Claim).excluded.status_ex,
+            "wb_comment": pg_insert(Claim).excluded.wb_comment,
+            "dt_update": pg_insert(Claim).excluded.dt_update,
+            "actions": pg_insert(Claim).excluded.actions,
+            "raw_data": pg_insert(Claim).excluded.raw_data,
+            "synced_at": datetime.utcnow(),
+        },
+    )
+    db.execute(stmt)
+
+
+def _parse_dt(val):
+    if not val:
+        return None
+    try:
+        from dateutil.parser import parse as parse_dt
+        return parse_dt(val).replace(tzinfo=None)
+    except Exception:
+        try:
+            return datetime.fromisoformat(val.replace("Z", "+00:00")).replace(tzinfo=None)
+        except Exception:
+            return None
+
+
+def get_claims(db: Session, cabinet_id: str | None = None, status: int | None = None, limit: int = 10000):
+    q = db.query(Claim)
+    if cabinet_id:
+        q = q.filter(Claim.cabinet_id == cabinet_id)
+    if status is not None:
+        q = q.filter(Claim.status == status)
+    return q.order_by(Claim.dt.desc()).limit(limit).all()
+
+
+def get_claims_stats(db: Session, cabinet_id: str | None = None, days_back: int = 14):
+    from sqlalchemy import func as sa_func
+    threshold = datetime.utcnow() - timedelta(days=days_back)
+    q = db.query(Claim).filter(Claim.dt >= threshold)
+    if cabinet_id:
+        q = q.filter(Claim.cabinet_id == cabinet_id)
+    rows = q.all()
+    total = len(rows)
+    by_status = {0: 0, 1: 0, 2: 0}
+    by_product = {}
+    by_reason = {}
+    for r in rows:
+        by_status[r.status] = by_status.get(r.status, 0) + 1
+        key = r.nm_id or 0
+        if key not in by_product:
+            by_product[key] = {"nm_id": key, "imt_name": r.imt_name or "", "count": 0, "total_price": 0}
+        by_product[key]["count"] += 1
+        by_product[key]["total_price"] += r.price
+        comment = (r.user_comment or "").strip()[:100]
+        if comment:
+            by_reason[comment] = by_reason.get(comment, 0) + 1
+    top_products = sorted(by_product.values(), key=lambda x: x["count"], reverse=True)[:20]
+    top_reasons = sorted([{"reason": k, "count": v} for k, v in by_reason.items()], key=lambda x: x["count"], reverse=True)[:10]
+    return {
+        "total": total,
+        "pending": by_status.get(0, 0),
+        "rejected": by_status.get(1, 0),
+        "approved": by_status.get(2, 0),
+        "top_products": top_products,
+        "top_reasons": top_reasons,
+    }
+
+
+# -------------------------
+# Logistics (Склады и тарифы)
+# -------------------------
+
+def upsert_warehouse(db: Session, item: dict):
+    office_id = item.get("id", 0)
+    stmt = pg_insert(Warehouse).values(
+        office_id=office_id,
+        name=item.get("name", ""),
+        address=item.get("address"),
+        city=item.get("city"),
+        cargo_type=item.get("cargoType", 0),
+        delivery_type=item.get("deliveryType", 0),
+        federal_district=item.get("federalDistrict"),
+        longitude=item.get("longitude"),
+        latitude=item.get("latitude"),
+        selected=item.get("selected", False),
+    ).on_conflict_do_update(
+        index_elements=["office_id"],
+        set_={
+            "name": pg_insert(Warehouse).excluded.name,
+            "address": pg_insert(Warehouse).excluded.address,
+            "city": pg_insert(Warehouse).excluded.city,
+            "cargo_type": pg_insert(Warehouse).excluded.cargo_type,
+            "delivery_type": pg_insert(Warehouse).excluded.delivery_type,
+            "federal_district": pg_insert(Warehouse).excluded.federal_district,
+            "selected": pg_insert(Warehouse).excluded.selected,
+            "synced_at": datetime.utcnow(),
+        },
+    )
+    db.execute(stmt)
+
+
+def clear_warehouses(db: Session):
+    db.query(Warehouse).delete()
+    db.commit()
+
+
+def get_warehouses(db: Session):
+    return db.query(Warehouse).order_by(Warehouse.name).all()
+
+
+def upsert_tariff_box(db: Session, wh: dict, tariff_date: str):
+    name = wh.get("warehouseName", "")
+    stmt = pg_insert(TariffBox).values(
+        warehouse_name=name,
+        geo_name=wh.get("geoName"),
+        delivery_base=wh.get("boxDeliveryBase"),
+        delivery_coef=wh.get("boxDeliveryCoefExpr"),
+        delivery_liter=wh.get("boxDeliveryLiter"),
+        delivery_marketplace_base=wh.get("boxDeliveryMarketplaceBase"),
+        delivery_marketplace_coef=wh.get("boxDeliveryMarketplaceCoefExpr"),
+        delivery_marketplace_liter=wh.get("boxDeliveryMarketplaceLiter"),
+        storage_base=wh.get("boxStorageBase"),
+        storage_coef=wh.get("boxStorageCoefExpr"),
+        storage_liter=wh.get("boxStorageLiter"),
+        tariff_date=tariff_date,
+        raw_data=wh,
+    ).on_conflict_do_update(
+        constraint="uq_tariff_box",
+        set_={
+            "delivery_base": pg_insert(TariffBox).excluded.delivery_base,
+            "delivery_coef": pg_insert(TariffBox).excluded.delivery_coef,
+            "storage_base": pg_insert(TariffBox).excluded.storage_base,
+            "storage_coef": pg_insert(TariffBox).excluded.storage_coef,
+            "tariff_date": pg_insert(TariffBox).excluded.tariff_date,
+            "raw_data": pg_insert(TariffBox).excluded.raw_data,
+            "synced_at": datetime.utcnow(),
+        },
+    )
+    db.execute(stmt)
+
+
+def clear_tariff_boxes(db: Session):
+    db.query(TariffBox).delete()
+    db.commit()
+
+
+def get_tariff_boxes(db: Session):
+    return db.query(TariffBox).order_by(TariffBox.warehouse_name).all()
+
+
+def upsert_tariff_pallet(db: Session, wh: dict, tariff_date: str):
+    name = wh.get("warehouseName", "")
+    stmt = pg_insert(TariffPallet).values(
+        warehouse_name=name,
+        delivery_expr=wh.get("palletDeliveryExpr"),
+        delivery_value_base=wh.get("palletDeliveryValueBase"),
+        delivery_value_liter=wh.get("palletDeliveryValueLiter"),
+        storage_expr=wh.get("palletStorageExpr"),
+        storage_value=wh.get("palletStorageValueExpr"),
+        tariff_date=tariff_date,
+        raw_data=wh,
+    ).on_conflict_do_update(
+        constraint="uq_tariff_pallet",
+        set_={
+            "delivery_value_base": pg_insert(TariffPallet).excluded.delivery_value_base,
+            "storage_value": pg_insert(TariffPallet).excluded.storage_value,
+            "tariff_date": pg_insert(TariffPallet).excluded.tariff_date,
+            "raw_data": pg_insert(TariffPallet).excluded.raw_data,
+            "synced_at": datetime.utcnow(),
+        },
+    )
+    db.execute(stmt)
+
+
+def clear_tariff_pallets(db: Session):
+    db.query(TariffPallet).delete()
+    db.commit()
+
+
+def get_tariff_pallets(db: Session):
+    return db.query(TariffPallet).order_by(TariffPallet.warehouse_name).all()
+
+
+def upsert_tariff_acceptance(db: Session, item: dict):
+    stmt = pg_insert(TariffAcceptance).values(
+        warehouse_id=item.get("warehouseID", 0),
+        warehouse_name=item.get("warehouseName", ""),
+        date=item.get("date", ""),
+        coefficient=item.get("coefficient", 0),
+        allow_unload=item.get("allowUnload", False),
+        box_type_id=item.get("boxTypeID", 0),
+        is_sorting_center=item.get("isSortingCenter", False),
+        storage_coef=item.get("storageCoef"),
+        delivery_coef=item.get("deliveryCoef"),
+        delivery_base_liter=item.get("deliveryBaseLiter"),
+        delivery_additional_liter=item.get("deliveryAdditionalLiter"),
+        storage_base_liter=item.get("storageBaseLiter"),
+        storage_additional_liter=item.get("storageAdditionalLiter"),
+        raw_data=item,
+    ).on_conflict_do_update(
+        constraint="uq_tariff_acceptance",
+        set_={
+            "coefficient": pg_insert(TariffAcceptance).excluded.coefficient,
+            "allow_unload": pg_insert(TariffAcceptance).excluded.allow_unload,
+            "raw_data": pg_insert(TariffAcceptance).excluded.raw_data,
+            "synced_at": datetime.utcnow(),
+        },
+    )
+    db.execute(stmt)
+
+
+def clear_tariff_acceptances(db: Session):
+    db.query(TariffAcceptance).delete()
+    db.commit()
+
+
+def get_tariff_acceptances(db: Session):
+    return db.query(TariffAcceptance).order_by(TariffAcceptance.warehouse_name).all()
+
+
+def upsert_tariff_return(db: Session, wh: dict, tariff_date: str):
+    name = wh.get("warehouseName", "")
+    stmt = pg_insert(TariffReturn).values(
+        warehouse_name=name,
+        delivery_dump_kgt_office_base=wh.get("deliveryDumpKgtOfficeBase"),
+        delivery_dump_kgt_office_liter=wh.get("deliveryDumpKgtOfficeLiter"),
+        delivery_dump_kgt_return=wh.get("deliveryDumpKgtReturnExpr"),
+        delivery_dump_srg_office=wh.get("deliveryDumpSrgOfficeExpr"),
+        delivery_dump_srg_return=wh.get("deliveryDumpSrgReturnExpr"),
+        delivery_dump_sup_courier_base=wh.get("deliveryDumpSupCourierBase"),
+        delivery_dump_sup_courier_liter=wh.get("deliveryDumpSupCourierLiter"),
+        delivery_dump_sup_office_base=wh.get("deliveryDumpSupOfficeBase"),
+        delivery_dump_sup_office_liter=wh.get("deliveryDumpSupOfficeLiter"),
+        delivery_dump_sup_return=wh.get("deliveryDumpSupReturnExpr"),
+        tariff_date=tariff_date,
+        raw_data=wh,
+    ).on_conflict_do_update(
+        constraint="uq_tariff_return",
+        set_={
+            "delivery_dump_sup_office_base": pg_insert(TariffReturn).excluded.delivery_dump_sup_office_base,
+            "delivery_dump_sup_return": pg_insert(TariffReturn).excluded.delivery_dump_sup_return,
+            "tariff_date": pg_insert(TariffReturn).excluded.tariff_date,
+            "raw_data": pg_insert(TariffReturn).excluded.raw_data,
+            "synced_at": datetime.utcnow(),
+        },
+    )
+    db.execute(stmt)
+
+
+def clear_tariff_returns(db: Session):
+    db.query(TariffReturn).delete()
+    db.commit()
+
+
+def get_tariff_returns(db: Session):
+    return db.query(TariffReturn).order_by(TariffReturn.warehouse_name).all()

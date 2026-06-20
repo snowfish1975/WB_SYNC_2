@@ -1,0 +1,215 @@
+<!-- ============================================================
+     TAB: ВОЗВРАТЫ / ПРЕТЕНЗИИ (Claims)
+     ============================================================ -->
+<div id="claimsTab">
+  <div class="summary-grid section-mb" id="clMetrics"></div>
+
+  <div class="card section-mb">
+    <div class="section-title">Динамика возвратов</div>
+    <div style="position:relative;height:250px;">
+      <canvas id="clChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card section-mb">
+    <div class="section-title">Топ товаров по возвратам</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>ТОВАР</th>
+          <th>АРТ WB</th>
+          <th>КОЛИЧЕСТВО</th>
+          <th>СУММА</th>
+        </tr></thead>
+        <tbody id="clTopBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card section-mb">
+    <div class="section-title">Причины возвратов (комментарии покупателей)</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>ПРИЧИНА</th>
+          <th>КОЛИЧЕСТВО</th>
+        </tr></thead>
+        <tbody id="clReasonsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Все заявки</div>
+    <div class="filters">
+      <input class="filter-input" id="clSearch" placeholder="Артикул / товар / srid..." oninput="clFilter()">
+      <select class="filter-select" id="clStatusFilter" onchange="clFilter()">
+        <option value="">Все статусы</option>
+        <option value="0">На рассмотрении</option>
+        <option value="1">Отклонено</option>
+        <option value="2">Одобрено</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th onclick="clSort('dt')">ДАТА ↕</th>
+          <th onclick="clSort('imt_name')">ТОВАР ↕</th>
+          <th onclick="clSort('nm_id')">АРТ WB ↕</th>
+          <th onclick="clSort('status')">СТАТУС ↕</th>
+          <th onclick="clSort('price')">ЦЕНА ↕</th>
+          <th>КОММЕНТАРИЙ</th>
+        </tr></thead>
+        <tbody id="clBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="clPagination"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let allClaims = [], filtered = [], page = 1;
+  let chart = null;
+  const PER = 50;
+  let sortCol = 'dt', sortDir = -1;
+
+  const STATUS_MAP = {0: 'На рассмотрении', 1: 'Отклонено', 2: 'Одобрено'};
+  const STATUS_COLOR = {0: 'var(--accent2)', 1: 'var(--red)', 2: 'var(--green)'};
+
+  async function clLoad() {
+    const cabinet = WB.cabinet || '';
+    try {
+      let url = '/api/dashboard/claims?days_back=14';
+      if (cabinet) url += `&cabinet_id=${cabinet}`;
+      const stats = await fetch(url).then(r => r.json());
+      renderMetrics(stats);
+      renderChart(stats);
+      renderTop(stats.top_products || []);
+      renderReasons(stats.top_reasons || []);
+    } catch(e) { console.error('Claims stats error:', e); }
+
+    try {
+      let listUrl = '/api/dashboard/claims-list?limit=5000';
+      if (cabinet) listUrl += `&cabinet_id=${cabinet}`;
+      allClaims = await fetch(listUrl).then(r => r.json());
+      allClaims.forEach(c => {
+        if (c.dt) c.dt_sort = c.dt;
+        else c.dt_sort = '';
+      });
+      clFilter();
+    } catch(e) { allClaims = []; clFilter(); }
+  }
+  window.clLoad = clLoad;
+
+  function renderMetrics(s) {
+    const m = document.getElementById('clMetrics');
+    if (!m) return;
+    m.innerHTML = `
+      <div class="card metric-card teal"><div class="metric-label">ВСЕГО</div><div class="metric-value">${s.total}</div><div class="metric-sub">за 14 дней</div></div>
+      <div class="card metric-card" style="border-color:var(--accent2)"><div class="metric-label">НА РАССМОТРЕНИИ</div><div class="metric-value">${s.pending}</div></div>
+      <div class="card metric-card" style="border-color:var(--red)"><div class="metric-label">ОТКЛОНЕНО</div><div class="metric-value">${s.rejected}</div></div>
+      <div class="card metric-card" style="border-color:var(--green)"><div class="metric-label">ОДОБРЕНО</div><div class="metric-value">${s.approved}</div></div>
+    `;
+  }
+
+  function renderChart(s) {
+    const ctx = document.getElementById('clChart');
+    if (!ctx) return;
+    if (chart) chart.destroy();
+    const labels = ['На рассмотрении', 'Отклонено', 'Одобрено'];
+    const data = [s.pending, s.rejected, s.approved];
+    const colors = ['rgba(234,179,8,0.7)', 'rgba(239,68,68,0.7)', 'rgba(34,197,94,0.7)'];
+    chart = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+    });
+  }
+
+  function renderTop(products) {
+    const body = document.getElementById('clTopBody');
+    if (!body) return;
+    if (!products.length) { body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px;">Нет данных</td></tr>'; return; }
+    body.innerHTML = products.map(p => `<tr>
+      <td>${esc(p.imt_name || '—')}</td>
+      <td class="td-mono">${p.nm_id || '—'}</td>
+      <td class="td-mono" style="font-weight:bold">${p.count}</td>
+      <td class="td-mono">${fmt(p.total_price)}</td>
+    </tr>`).join('');
+  }
+
+  function renderReasons(reasons) {
+    const body = document.getElementById('clReasonsBody');
+    if (!body) return;
+    if (!reasons.length) { body.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text3);padding:20px;">Нет данных</td></tr>'; return; }
+    body.innerHTML = reasons.map(r => `<tr>
+      <td>${esc(r.reason)}</td>
+      <td class="td-mono" style="font-weight:bold">${r.count}</td>
+    </tr>`).join('');
+  }
+
+  function clFilter() {
+    const search = (document.getElementById('clSearch')?.value || '').toLowerCase();
+    const status = document.getElementById('clStatusFilter')?.value;
+    filtered = allClaims.filter(c => {
+      if (WB.cabinet && c.cabinet_id !== WB.cabinet) return false;
+      if (status !== '' && status !== undefined && `${c.status}` !== status) return false;
+      if (search && !`${c.nm_id}`.includes(search) && !(c.imt_name||'').toLowerCase().includes(search) && !(c.srid||'').toLowerCase().includes(search) && !(c.user_comment||'').toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortData();
+  }
+  window.clFilter = clFilter;
+
+  function clSort(col) {
+    if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+    sortData();
+  }
+  window.clSort = clSort;
+
+  function sortData() {
+    filtered.sort((a, b) => {
+      let va = a[sortCol] || a[sortCol + '_sort'] || '';
+      let vb = b[sortCol] || b[sortCol + '_sort'] || '';
+      if (va == null) va = sortDir > 0 ? '' : '~';
+      if (vb == null) vb = sortDir > 0 ? '' : '~';
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return ((va || 0) - (vb || 0)) * sortDir;
+    });
+    page = 1;
+    render();
+  }
+
+  function render() {
+    const body = document.getElementById('clBody');
+    if (!body) return;
+    const slice = filtered.slice((page-1)*PER, page*PER);
+    if (!filtered.length) {
+      body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:30px;">Нет данных</td></tr>';
+      document.getElementById('clPagination').innerHTML = '';
+      return;
+    }
+    body.innerHTML = slice.map(c => {
+      const st = c.status || 0;
+      const color = STATUS_COLOR[st] || 'var(--text2)';
+      const label = STATUS_MAP[st] || '—';
+      return `<tr>
+        <td class="td-mono" style="font-size:11px">${c.dt ? new Date(c.dt).toLocaleDateString('ru-RU') : '—'}</td>
+        <td>${esc(c.imt_name || '—')}</td>
+        <td class="td-mono">${c.nm_id || '—'}</td>
+        <td><span style="color:${color};font-weight:600">${label}</span></td>
+        <td class="td-mono">${fmt(c.price)}</td>
+        <td style="font-size:11px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.user_comment||'')}">${esc((c.user_comment||'').substring(0,80))}</td>
+      </tr>`;
+    }).join('');
+    renderPagination('clPagination', filtered.length, PER, page, p => { page = p; render(); });
+  }
+
+  function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+
+  window.addEventListener('wb:tab-activated:claims', clLoad);
+  window.addEventListener('wb:period-changed', () => { if (allClaims.length) clLoad(); });
+  window.addEventListener('wb:cabinet-changed', () => { clFilter(); });
+})();
+</script>
