@@ -4,6 +4,16 @@
 <div id="claimsTab">
   <div class="summary-grid section-mb" id="clMetrics"></div>
 
+  <div class="card section-mb" id="clWarning" style="display:none;border:1px solid var(--accent2);background:rgba(234,179,8,0.08);padding:16px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="font-size:24px;">⚠️</span>
+      <div>
+        <div style="font-weight:600;color:var(--accent2);margin-bottom:4px;">Для загрузки возвратов нужен токен с категорией «Маркетплейс»</div>
+        <div style="font-size:12px;color:var(--text2);">API возвратов (returns-api) требует специальный scope. Создайте токен в WB-кабинете: Настройки → API-ключи → категория «Маркетплейс» или «Возвраты». Затем добавьте его в таблицу wb_tokens.</div>
+      </div>
+    </div>
+  </div>
+
   <div class="card section-mb">
     <div class="section-title">Динамика возвратов</div>
     <div style="position:relative;height:250px;">
@@ -87,6 +97,9 @@
       renderChart(stats);
       renderTop(stats.top_products || []);
       renderReasons(stats.top_reasons || []);
+
+      const warn = document.getElementById('clWarning');
+      if (warn) warn.style.display = stats.total === 0 ? 'block' : 'none';
     } catch(e) { console.error('Claims stats error:', e); }
 
     try {

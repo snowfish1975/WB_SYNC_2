@@ -94,6 +94,7 @@ class WbTokenCreate(BaseModel):
 class WbTokenUpdate(BaseModel):
     seller_name: str | None = None
     is_active: bool | None = None
+    skip_sync: bool | None = None
 
 
 class WbTokenOut(BaseModel):
@@ -102,6 +103,7 @@ class WbTokenOut(BaseModel):
     seller_name: str
     token_hash: str
     is_active: bool
+    skip_sync: bool
     created_at: datetime
     updated_at: datetime | None = None
 

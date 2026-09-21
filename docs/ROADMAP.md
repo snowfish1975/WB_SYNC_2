@@ -14,13 +14,13 @@ Stack: Python 3.12, FastAPI, SQLAlchemy 2.x, PostgreSQL, APScheduler, httpx, uvl
 
 | Компонент | Статус | Объём |
 |---|---|---|
-| WB API источники | 5 из 8+ | content, statistics, analytics, advert, prices |
-| Data модели | 18 | Полное покрытие текущих источников |
+| WB API источники | 7 из 8+ | content, statistics, analytics v1/v2/v3, advert, prices, returns-api |
+| Data модели | 24 | Полное покрытие текущих источников + RNP + Auth |
 | API эндпоинты | 33+ | 14 raw POST + 19 dashboard GET + RNP CRUD |
 | Вкладки дашборда | 17 | Аналитика (8) + Данные (9) |
-| Синхронизация | Ежедневная | APScheduler, rate limits соблюдены |
+| Синхронизация | ⏸ Отключена | APScheduler выключен флагом `SCHEDULER_ENABLED=false`; включается одной переменной в `.env` |
 | Авторизация | Базовая | Cookie-based, 2 роли (admin/user) |
-| Кабинетов в системе | 19 | Все активные токены в wb_tokens |
+| Кабинетов в системе | 18 active + 1 skip_sync | 18 синхронизируются, 1 (ИП Чернова) исключён |
 
 ---
 
@@ -285,11 +285,18 @@ CREATE TABLE search_volumes (
 
 ## Текущие known issues
 
-1. **ShelfMetrics daily accumulation** — переключение на подневные данные начато, но нужно дождаться накопления 40 дней для корректных дельт
-2. **AdCampaignStats пуст для Brykin** — 0 строк из-за 429 rate limits при синхронизации
+1. **ShelfMetrics daily accumulation** — 40 дней накоплены для всех кабинетов ✅
+2. **AdCampaignStats** — работает, rate limits соблюдены ✅
 3. **RNP скорость** — ~15 сек на расчёт (нужно оптимизировать per-query агрегаты)
 4. **Auth JWT** — сейчас cookie-based, ограничивает мобильных клиентов
 5. **Search Report заблокирован** — 403 без Jam-токена
+6. **Claims (возвраты)** — API `returns-api` требует scope «Маркетплейс»; у большинства кабинетов токены без этого scope
+7. **chrt_id BigInteger** — WB ID карточек превысили INT4 max; исправлено 20.08.2026
+8. **ItemRating v2** — API v1 deprecated (404); миграция на v2 выполнена 20.08.2026
+9. **skip_sync** — механизм исключения кабинетов из синхронизации добавлен 20.08.2026
+10. **Отчёт реализации: миграция на finance-api (21.09.2026)** — старый `GET statistics-api /api/v5/supplier/reportDetailByPeriod` WB вывел из эксплуатации и оставил на нём остаточную квоту (~1 запрос в 24–36 ч на аккаунт, отсюда 429 с 07.09). Загрузка переведена на `POST finance-api /api/finance/v1/sales-reports/detailed`; поля переименованы (`ppvz_for_pay`→`forPay`, `storage_fee`→`paidStorage`, `delivery_rub`→`deliveryService`, `acceptance`→`paidAcceptance`, `sa_name`→`vendorCode`, `ts_name`→`techSize`, `barcode`→`sku`, `supplier_oper_name`→`sellerOperName`, `site_country`→`country`, `ppvz_spp_prc`→`spp` и т.д.), суммы приходят строками, убраны `suppliercontract_code` и `ppvz_supplier_id`, добавлены `title`, `paidWithSocialCertificate`, `warehouseLogisticsCoeff`. Маппинг: `app/wb_client.py` → `SALES_REPORT_FIELD_MAP`, колонки БД оставлены прежними. ⚠️ **Требуется токен с категорией «Финансы»** — текущие токены её не имеют (403 «scope is not allowed»), нужно дополнить категорию в кабинете WB; пропущенные 19–21.09 догрузить backfill'ом.
+   ✅ 21.09.2026: код выверен (нормализация finance-api проверена unit-тестом на примере строки, все модули импортируются). Протестированы ВСЕ 18 активных токенов реальным запросом к finance-api — **ни один не имеет категории «Финансы»** (все 403 `scope is not allowed`). Блокер целиком на стороне пользователя: в каждом WB-кабинете (Настройки → Интеграции по API) добавить категорию «Финансы» у существующего токена, затем `POST /api/sync/trigger-sales-report-backfill?days=7`. UI: на вкладке «Отчёт реализации» добавлен баннер-подсказка (показывается, если за 2 дня нет данных), в админ-панели добавлено управление токенами (вкл/выкл, skip_sync).
+11. **WB токены и категории** — с 15.09.2026 WB разделяет токены по категориям: «Финансы» нужна для finance-api (отчёт реализации), «Маркетплейс» — для returns-api (возвраты/claims). Старые токены без этих категорий продолжают работать для content/statistics/analytics/advert/prices. Проверка категории: тестовый запрос к соответствующему API (см. known issue 10).
 
 ---
 
@@ -302,11 +309,11 @@ CREATE TABLE search_volumes (
 | Заказы | POST /api/orders | statistics-api `GET /api/v1/supplier/orders` |
 | Продажи | POST /api/sales | statistics-api `GET /api/v1/supplier/sales` |
 | Цены | POST /api/prices | prices-api `GET /api/v2/list/goods/filter` |
-| Отчёт реализации | POST /api/sales-report | statistics-api `GET /api/v5/supplier/reportDetailByPeriod` |
+| Отчёт реализации | POST /api/sales-report | finance-api `POST /api/finance/v1/sales-reports/detailed` |
 | Витрина (подневная) | POST /api/shelf-metrics | analytics-api `POST /api/analytics/v3/sales-funnel/products` |
 | Воронка (агрегат) | POST /api/funnel-metrics | analytics-api `POST /api/analytics/v3/sales-funnel/products` |
 | Остатки по офисам | POST /api/stock-offices | analytics-api `POST /api/v2/stocks-report/offices` |
-| Рейтинги товаров | POST /api/item-ratings | analytics-api `POST /api/analytics/v1/item-rating` |
+| Рейтинги товаров | POST /api/item-ratings | analytics-api `POST /api/analytics/v2/item-rating` |
 | Рекламные кампании | POST /api/ad-campaigns | advert-api `GET /adv/v1/promotion/count` |
 | Статистика рекламы | POST /api/ad-stats | advert-api `GET /adv/v3/fullstats` |
 | Затраты на рекламу | POST /api/ad-expenses | advert-api `GET /adv/v1/upd` |
@@ -333,4 +340,4 @@ CREATE TABLE search_volumes (
 
 ---
 
-*Последнее обновление: 2026-06-18*
+*Последнее обновление: 2026-09-21*

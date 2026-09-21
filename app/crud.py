@@ -386,7 +386,9 @@ def upsert_sales_report_row(db: Session, cabinet_id: str, row: dict):
         srv_dbs=row.get("srv_dbs"),
         is_legal_entity=row.get("is_legal_entity"),
         report_type=row.get("report_type"),
-        raw_data=row,
+        # _raw — исходная строка ответа WB (finance-api отдаёт camelCase),
+        # _api — маркер метода, который её загрузил
+        raw_data=row.get("_raw", row),
         synced_at=datetime.utcnow(),
     ).on_conflict_do_update(
         constraint="uq_sales_report_row",
@@ -648,7 +650,7 @@ def get_tokens_from_db() -> list[dict]:
     from app.database import SessionLocal
     db = SessionLocal()
     try:
-        tokens = db.query(WbToken).filter(WbToken.is_active == True).all()
+        tokens = db.query(WbToken).filter(WbToken.is_active == True, WbToken.skip_sync == False).all()
         return [{"token": t.token, "name": t.seller_name, "cabinet_id": t.token_hash} for t in tokens]
     finally:
         db.close()
@@ -903,7 +905,11 @@ def upsert_item_rating(db: Session, cabinet_id: str, card: dict, seller_rating: 
     stmt = pg_insert(ItemRating).values(
         cabinet_id=cabinet_id, nm_id=card.get("nmId", 0),
         vendor_code=card.get("vendorCode", ""), product_name=card.get("title", ""),
+        subject_id=card.get("subjectId"),
         subject_name=card.get("subjectName", ""), brand_name=card.get("brandName", ""),
+        tag_name=card.get("tagName", ""),
+        tag_id=card.get("tagId"),
+        is_shadowed=card.get("isShadowed", False),
         period_start=period_start, period_end=period_end,
         seller_rating=seller_rating,
         product_rating=card.get("rating", 0),
@@ -919,7 +925,7 @@ def upsert_item_rating(db: Session, cabinet_id: str, card: dict, seller_rating: 
         raw_data=card,
     ).on_conflict_do_update(
         constraint="uq_item_rating",
-        set_={"feedback_rating": pg_insert(ItemRating).excluded.feedback_rating, "feedback_count": pg_insert(ItemRating).excluded.feedback_count, "five_star": pg_insert(ItemRating).excluded.five_star, "four_star": pg_insert(ItemRating).excluded.four_star, "three_star": pg_insert(ItemRating).excluded.three_star, "two_star": pg_insert(ItemRating).excluded.two_star, "one_star": pg_insert(ItemRating).excluded.one_star, "seller_rating": pg_insert(ItemRating).excluded.seller_rating, "raw_data": pg_insert(ItemRating).excluded.raw_data, "synced_at": datetime.utcnow()},
+        set_={"feedback_rating": pg_insert(ItemRating).excluded.feedback_rating, "feedback_count": pg_insert(ItemRating).excluded.feedback_count, "five_star": pg_insert(ItemRating).excluded.five_star, "four_star": pg_insert(ItemRating).excluded.four_star, "three_star": pg_insert(ItemRating).excluded.three_star, "two_star": pg_insert(ItemRating).excluded.two_star, "one_star": pg_insert(ItemRating).excluded.one_star, "seller_rating": pg_insert(ItemRating).excluded.seller_rating, "subject_id": pg_insert(ItemRating).excluded.subject_id, "tag_name": pg_insert(ItemRating).excluded.tag_name, "tag_id": pg_insert(ItemRating).excluded.tag_id, "is_shadowed": pg_insert(ItemRating).excluded.is_shadowed, "raw_data": pg_insert(ItemRating).excluded.raw_data, "synced_at": datetime.utcnow()},
     )
     db.execute(stmt)
 

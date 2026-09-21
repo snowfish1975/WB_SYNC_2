@@ -684,7 +684,7 @@ def run_sync_all():
 
     async def _run():
         start_time = datetime.now()
-        semaphore = asyncio.Semaphore(1)
+        semaphore = asyncio.Semaphore(2)
 
         async def sync_with_limit(cabinet):
             async with semaphore:

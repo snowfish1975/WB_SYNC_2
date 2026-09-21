@@ -15,8 +15,8 @@
  *   const data = WBSync.getProducts('your-api-token');
  *   Logger.log(data.length + ' products loaded');
  *
- * Версия: 1.1.0
- * Дата: 2026-06-18
+ * Версия: 1.2.0
+ * Дата: 2026-08-20
  * Автор: WB Sync
  * ============================================================
  *
@@ -40,8 +40,8 @@
  * getPrices()           │ POST /api/prices       │ discounts-prices-api.wildberries.ru
  *                       │                       │   GET /api/v2/list/goods/filter
  * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
- * getSalesReport()      │ POST /api/sales-report │ statistics-api.wildberries.ru
- *                       │                       │   GET /api/v5/supplier/reportDetailByPeriod
+ * getSalesReport()      │ POST /api/sales-report │ finance-api.wildberries.ru
+ *                       │                       │   POST /api/finance/v1/sales-reports/detailed
  * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
  * getShelfMetrics()     │ POST /api/shelf-metrics│ seller-analytics-api.wildberries.ru
  *                       │                       │   POST /api/analytics/v3/sales-funnel/products
@@ -55,7 +55,7 @@
  *                       │                       │   POST /api/v2/stocks-report/offices
  * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
  * getItemRatings()      │ POST /api/item-ratings │ seller-analytics-api.wildberries.ru
- *                       │                       │   POST /api/analytics/v1/item-rating
+ *                       │                       │   POST /api/analytics/v2/item-rating
  * ──────────────────────┼───────────────────────┼────────────────────────────────────────────────────
  * getAdCampaigns()      │ POST /api/ad-campaigns │ advert-api.wildberries.ru
  *                       │                       │   GET /adv/v1/promotion/count
@@ -403,8 +403,12 @@ function getPrices(token, nm_id) {
 /**
  * Получить отчёт реализации.
  *
- * Эндпоинт API Wildberries: statistics-api.wildberries.ru
- * GET /api/v1/supplier/report
+ * Эндпоинт API Wildberries: finance-api.wildberries.ru
+ * POST /api/finance/v1/sales-reports/detailed
+ *
+ * Требуется токен с категорией «Финансы». Поля ответа WB переименованы
+ * (сопоставление — SALES_REPORT_FIELD_MAP в app/wb_client.py), но в этом
+ * API-эндпоинте проекта они отдаются в прежних названиях колонок SalesReport.
  *
  * Возвращает детальный финансовый отчёт по продажам с полной разбивкой
  * расходов: комиссия WB, доставка, хранение, штрафы, приёмка, эквайринг.
@@ -613,7 +617,7 @@ function getStockOffices(token, days_back) {
  * Получить рейтинги и отзывы товаров.
  *
  * Эндпоинт API Wildberries: seller-analytics-api.wildberries.ru
- * POST /api/analytics/v1/item-rating
+ * POST /api/analytics/v2/item-rating
  *
  * Возвращает рейтинги товаров: общий рейтинг, количество отзывов,
  * распределение по звёздам, перцентиль.

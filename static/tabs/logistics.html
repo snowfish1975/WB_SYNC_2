@@ -302,15 +302,17 @@
 
 <script>
 (function() {
-  let tariffData = [], tariffFiltered = [];
+  let tariffAll = {}, tariffData = [], tariffFiltered = [];
   let tSortCol = 'warehouse_name', tSortDir = 1;
 
   async function tariffLoad() {
     try {
-      const res = await fetch('/api/dashboard/tariffs');
-      const data = await res.json();
+      if (!tariffAll.boxes) {
+        const res = await fetch('/api/dashboard/tariffs');
+        tariffAll = await res.json();
+      }
       const type = document.getElementById('tariffType')?.value || 'boxes';
-      tariffData = (data[type] || []).map(r => ({
+      tariffData = (tariffAll[type] || []).map(r => ({
         warehouse_name: r.warehouse_name || '',
         delivery_base: r.delivery_base || r.delivery_value_base || r.delivery_dump_sup_office_base || '',
         storage_base: r.storage_base || r.storage_value || '',
@@ -360,6 +362,6 @@
   function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
 
   window.addEventListener('wb:tab-activated:logistics', tariffLoad);
-  window.addEventListener('wb:cabinet-changed', tariffLoad);
+  window.addEventListener('wb:cabinet-changed', () => { tariffAll = {}; tariffLoad(); });
 })();
 </script>

@@ -184,7 +184,7 @@ async def fetch_stock_by_offices(token: str, date_from: str, date_to: str) -> li
 
 
 async def fetch_item_rating(token: str, date_from: str, date_to: str, limit: int = 1000) -> tuple[list[dict], float]:
-    """POST /api/analytics/v1/item-rating. Note: end date CANNOT be today."""
+    """POST /api/analytics/v2/item-rating. Note: end date CANNOT be today."""
     headers = {"Authorization": token}
     offset = 0
     results = []
@@ -195,7 +195,7 @@ async def fetch_item_rating(token: str, date_from: str, date_to: str, limit: int
             payload = {"currentPeriod": {"start": date_from, "end": date_to}, "isNotIncludeNMsWithoutSales": True, "orderBy": {"field": "feedbackCount", "mode": "desc"}, "limit": limit, "offset": offset}
             for attempt in range(1, max_attempts + 1):
                 try:
-                    resp = await client.post(f"{WB_ANALYTICS_BASE}/api/analytics/v1/item-rating", headers=headers, json=payload)
+                    resp = await client.post(f"{WB_ANALYTICS_BASE}/api/analytics/v2/item-rating", headers=headers, json=payload)
                     resp.raise_for_status()
                     body = resp.json()
                     break
@@ -206,7 +206,7 @@ async def fetch_item_rating(token: str, date_from: str, date_to: str, limit: int
             data = body.get("data", {})
             if not seller_rating:
                 seller_rating = data.get("sellerRating", {}).get("current", 0)
-            cards = data.get("cards", [])
+            cards = data.get("items", [])
             results.extend(cards)
             logger.info(f"Item rating: {len(cards)} cards, offset={offset}")
             if len(cards) < limit: break

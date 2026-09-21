@@ -43,6 +43,21 @@
     </form>
   </div>
 
+  <div class="card section-mb">
+    <div class="section-title">WB Токены (кабинеты)</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>ПРОДАВЕЦ</th>
+          <th>СТАТУС</th>
+          <th>СИНХРОНИЗАЦИЯ</th>
+          <th>ДЕЙСТВИЯ</th>
+        </tr></thead>
+        <tbody id="adminTokensBody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="card">
     <div class="section-title">Пользователи</div>
     <div class="table-wrap">
@@ -80,6 +95,7 @@
 .status-active { color: #44cf6c; }
 .status-inactive { color: #ff4757; }
 .role-admin { color: #ffc107; }
+.status-skip { color: #ff9800; }
 .role-user { color: var(--text3); }
 .admin-cab-modal {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -99,6 +115,44 @@
 (function() {
   let usersData = [];
   let allCabinets = [];
+  let tokensData = [];
+
+  async function loadTokens() {
+    try {
+      const resp = await fetch('/api/wb-tokens');
+      if (!resp.ok) return;
+      tokensData = await resp.json();
+      renderTokens();
+    } catch(e) { console.error('Tokens load error:', e); }
+  }
+
+  function renderTokens() {
+    const body = document.getElementById('adminTokensBody');
+    if (!body) return;
+    body.innerHTML = tokensData.map(t => `<tr>
+      <td>${esc(t.seller_name)}</td>
+      <td><span class="${t.is_active ? 'status-active' : 'status-inactive'}">${t.is_active ? 'Активен' : 'Выключен'}</span></td>
+      <td><span class="${t.skip_sync ? 'status-skip' : 'status-active'}">${t.skip_sync ? '⏸ Исключён' : '✓ Включён'}</span></td>
+      <td><div class="admin-actions">
+        <button class="admin-btn" onclick="toggleSkipSync(${t.id}, ${!t.skip_sync})">${t.skip_sync ? 'Включить в синк' : 'Исключить из синка'}</button>
+        <button class="admin-btn ${t.is_active ? 'danger' : ''}" onclick="toggleToken(${t.id}, ${!t.is_active})">${t.is_active ? 'Выключить' : 'Включить'}</button>
+      </div></td>
+    </tr>`).join('');
+  }
+
+  window.toggleSkipSync = async function(id, skip) {
+    const fd = new FormData();
+    fd.append('skip_sync', skip);
+    await fetch(`/api/wb-tokens/${id}`, { method: 'PUT', body: fd });
+    loadTokens();
+  };
+
+  window.toggleToken = async function(id, active) {
+    const fd = new FormData();
+    fd.append('is_active', active);
+    await fetch(`/api/wb-tokens/${id}`, { method: 'PUT', body: fd });
+    loadTokens();
+  };
 
   async function loadUsers() {
     const resp = await fetch('/api/admin/users');
@@ -218,6 +272,6 @@
 
   function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
 
-  window.addEventListener('wb:tab-activated:admin', () => { loadUsers(); loadCabs(); });
+  window.addEventListener('wb:tab-activated:admin', () => { loadUsers(); loadCabs(); loadTokens(); });
 })();
 </script>

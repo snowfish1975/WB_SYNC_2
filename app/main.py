@@ -56,6 +56,12 @@ logger = logging.getLogger(__name__)
 
 scheduler = BackgroundScheduler()
 
+# --- Автозагрузка данных по расписанию ---
+# Сейчас новые данные из WB API не собираются, поэтому планировщик выключен по умолчанию.
+# Чтобы вернуть автозагрузку: задать SCHEDULER_ENABLED=true в .env и перезапустить сервис
+# (либо поменять значение по умолчанию ниже на "true").
+SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+
 
 def token_id(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()[:32]
@@ -75,22 +81,32 @@ async def lifespan(app: FastAPI):
                 raise RuntimeError("Не удалось подключиться к БД после 10 попыток")
             await asyncio.sleep(5)
 
-    sync_hour = int(os.getenv("SYNC_HOUR", "3"))
-    scheduler.add_job(run_sync_all, "cron", hour=sync_hour, minute=0, id="wb_sync")
+    if SCHEDULER_ENABLED:
+        sync_hour = int(os.getenv("SYNC_HOUR", "3"))
+        scheduler.add_job(run_sync_all, "cron", hour=sync_hour, minute=0, id="wb_sync")
 
-    # Отчёт реализации — в 10:30 МСК = 07:30 UTC
-    scheduler.add_job(
-        run_sales_report_sync,
-        "cron",
-        hour=7,
-        minute=30,
-        id="wb_sales_report_sync",
-        timezone="UTC",
-    )
+        # Отчёт реализации — в 10:30 МСК = 07:30 UTC
+        scheduler.add_job(
+            run_sales_report_sync,
+            "cron",
+            hour=7,
+            minute=30,
+            id="wb_sales_report_sync",
+            timezone="UTC",
+        )
 
-    scheduler.start()
+        scheduler.start()
+        logger.info(f"Планировщик WB включён: синхронизация в {sync_hour}:00 UTC, отчёт реализации в 07:30 UTC")
+    else:
+        logger.info(
+            "Планировщик WB отключён (SCHEDULER_ENABLED=false): загрузка данных по расписанию не выполняется. "
+            "Для включения задайте SCHEDULER_ENABLED=true в .env и перезапустите сервис."
+        )
+
     yield
-    scheduler.shutdown()
+
+    if SCHEDULER_ENABLED:
+        scheduler.shutdown()
 
 
 app = FastAPI(title="WB Sync API", description="Синхронизация данных Wildberries", lifespan=lifespan)
@@ -966,8 +982,11 @@ def dashboard_stocks_summary(request: Request, db: Session = Depends(get_db)):
 
 
 @app.get("/api/dashboard/sales-report-summary")
-def dashboard_sales_report_summary(request: Request, db: Session = Depends(get_db)):
-    """Сводка по отчёту реализации: комиссии WB, к перечислению."""
+def dashboard_sales_report_summary(request: Request, days_back: int | None = Query(None, ge=1, le=365), db: Session = Depends(get_db)):
+    """Сводка по отчёту реализации: комиссии WB, к перечислению.
+
+    days_back — опциональный фильтр по дате продажи (sale_dt); без него — вся накопленная история.
+    """
     allowed = _get_user_cabinets(request, db)
     if allowed is not None and len(allowed) == 0:
         return []
@@ -987,6 +1006,8 @@ def dashboard_sales_report_summary(request: Request, db: Session = Depends(get_d
             func.count(SalesReport.id).label("rows_count"),
         )
     q = _filter_by_cabinets(q, allowed, SalesReport.cabinet_id)
+    if days_back is not None:
+        q = q.filter(SalesReport.sale_dt >= datetime.now() - timedelta(days=days_back))
     rows = q.group_by(SalesReport.cabinet_id, SalesReport.nm_id, SalesReport.sa_name, SalesReport.subject_name).order_by(func.sum(SalesReport.ppvz_for_pay).desc()).all()
 
     result = []
